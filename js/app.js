@@ -267,16 +267,8 @@ function renderDashboard() {
   document.getElementById('page-content').innerHTML = '<h1>Dashboard</h1>';
 }
 
-function renderImport() {
-  document.getElementById('page-content').innerHTML = '<h1>Import</h1>';
-}
-
 function renderReports() {
   document.getElementById('page-content').innerHTML = '<h1>Reports</h1>';
-}
-
-function renderSettings() {
-  document.getElementById('page-content').innerHTML = '<h1>Settings</h1>';
 }
 
 window.onLoginSuccess = function (session) {
@@ -320,6 +312,4 @@ document.addEventListener('DOMContentLoaded', init);
 window.navigateTo = navigateTo;
 window.renderNav = renderNav;
 window.renderDashboard = renderDashboard;
-window.renderImport = renderImport;
 window.renderReports = renderReports;
-window.renderSettings = renderSettings;

@@ -97,7 +97,7 @@ function formatMoney(amount) {
 }
 
 function parseCSV(csvString) {
-  const result = window.Papa.parse(csvString, { header: true, skipEmptyLines: true });
+  const result = window.Papa.parse(csvString, { header: true, skipEmptyLines: true, delimiter: ',' });
   return { data: result.data, errors: result.errors };
 }
 

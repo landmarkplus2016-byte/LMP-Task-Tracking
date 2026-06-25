@@ -560,3 +560,701 @@
 .calc-warning svg {
   flex-shrink: 0;
 }
+
+/* ==========================================================================
+   Settings — Price Catalog — DESIGN_SPEC.md section 9.6
+   ========================================================================== */
+
+.catalog-row {
+  cursor: pointer;
+}
+
+.catalog-expand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  transition: transform .12s ease;
+}
+
+.catalog-expand-icon.expanded {
+  transform: rotate(90deg);
+  color: var(--ink-2);
+}
+
+.catalog-items-row td {
+  height: auto;
+  padding: 0;
+  background: var(--surface-2);
+  white-space: normal;
+}
+
+.catalog-items-wrap {
+  padding: 12px 18px 16px 48px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.catalog-items-table th {
+  background: transparent;
+}
+
+.catalog-upload-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 10px;
+  flex-wrap: wrap;
+}
+
+.catalog-diff-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--slate-bg);
+  color: var(--ink-2);
+}
+
+.catalog-diff-chip.new {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.catalog-diff-chip.removed {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.catalog-diff-chip.changed {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.catalog-preview-table-wrap {
+  max-height: 320px;
+}
+
+.badge.catalog-diff-new {
+  color: var(--green);
+  background: var(--green-bg);
+}
+
+.badge.catalog-diff-removed {
+  color: var(--red);
+  background: var(--red-bg);
+}
+
+.badge.catalog-diff-changed {
+  color: var(--amber);
+  background: var(--amber-bg);
+}
+
+.catalog-diff-removed-row td {
+  opacity: 0.6;
+}
+
+.stream-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stream-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: var(--slate-bg);
+  color: var(--ink-2);
+}
+
+/* ==========================================================================
+   Settings shell — DESIGN_SPEC.md section 9.6
+   ========================================================================== */
+
+.settings-page {
+  padding: 26px;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+.settings-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.settings-nav {
+  width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  gap: 2px;
+}
+
+.settings-nav-item {
+  text-align: left;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+
+.settings-nav-item:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.settings-nav-item.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ==========================================================================
+   Contractor Portions — DESIGN_SPEC.md section 9.6
+   ========================================================================== */
+
+.contractor-portion-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.contractor-portion-card {
+  padding: 16px 18px;
+}
+
+.contractor-portion-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.contractor-portion-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.contractor-portion-pct {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  margin-top: 4px;
+}
+
+.contractor-portion-since {
+  color: var(--ink-3);
+}
+
+.contractor-portion-empty {
+  font-size: 12.5px;
+  color: var(--amber);
+  margin-top: 4px;
+}
+
+.contractor-portion-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.contractor-portion-history {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-2);
+}
+
+/* ==========================================================================
+   Master table — PM / AM / CCM view — DESIGN_SPEC.md section 9.2
+   ========================================================================== */
+
+.master-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+  padding: 0;
+}
+
+.master-page .tasks-page-header {
+  padding: 20px 26px 0;
+}
+
+.master-page .tasks-filters-bar {
+  padding: 14px 26px;
+  margin-bottom: 0;
+}
+
+.master-table-section {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0 26px 26px;
+}
+
+.master-table-wrap {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.master-table th,
+.master-table td {
+  white-space: nowrap;
+}
+
+.master-checkbox-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.row-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  border: 1.5px solid #cbd2db;
+  background: #fff;
+  color: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.row-checkbox.checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.data-table tr.data-row.selected-row {
+  background: var(--accent-bg);
+}
+
+.id-coord-bar {
+  display: inline-block;
+  width: 4px;
+  height: 16px;
+  border-radius: 2px;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+
+.pm-col-header {
+  background: var(--amber-bg) !important;
+  color: var(--amber) !important;
+}
+
+.pm-col-cell {
+  background: #fffdf8;
+  cursor: pointer;
+  transition: background .12s ease;
+}
+
+.pm-col-cell:hover {
+  background: var(--amber-bg);
+}
+
+.pm-col-cell.editing {
+  background: var(--surface);
+  padding: 0 6px;
+  cursor: default;
+}
+
+.inline-edit-input {
+  height: 32px;
+  font-size: 12.5px;
+}
+
+.th-lock-icon {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 4px;
+  opacity: 0.55;
+}
+
+.master-columns-wrap {
+  position: relative;
+}
+
+.master-columns-menu {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  width: 260px;
+  max-height: 360px;
+  overflow: auto;
+  z-index: 40;
+  padding: 10px;
+  box-shadow: var(--shadow-lg);
+}
+
+.master-columns-group {
+  margin-bottom: 10px;
+}
+
+.master-columns-group:last-child {
+  margin-bottom: 0;
+}
+
+.master-columns-group-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 4px 6px;
+}
+
+.master-columns-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.master-columns-item:hover {
+  background: var(--surface-2);
+}
+
+.master-columns-item.locked {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.master-columns-item.locked:hover {
+  background: transparent;
+}
+
+.master-columns-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.master-columns-item svg {
+  margin-left: auto;
+  opacity: 0.55;
+}
+
+.master-bulk-bar {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--ink);
+  color: #fff;
+  border-radius: 12px;
+  padding: 9px 12px 9px 16px;
+  box-shadow: var(--shadow-lg);
+  z-index: 60;
+}
+
+.master-bulk-count {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.master-bulk-divider {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, .16);
+}
+
+.master-bulk-btn {
+  background: rgba(255, 255, 255, .08);
+  border: none;
+  border-radius: 7px;
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s ease;
+}
+
+.master-bulk-btn:hover {
+  background: rgba(255, 255, 255, .16);
+}
+
+.master-bulk-close {
+  padding: 7px 9px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ==========================================================================
+   Import — DESIGN_SPEC.md section 9.4
+   ========================================================================== */
+
+.import-page {
+  padding: 26px;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.import-page h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0;
+}
+
+.import-page .tasks-subtitle {
+  margin-bottom: 20px;
+}
+
+.import-dropzone {
+  border: 2px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 48px;
+  text-align: center;
+  color: var(--ink-2);
+  transition: border-color .12s ease, background .12s ease;
+}
+
+.import-dropzone svg {
+  color: var(--ink-3);
+  margin-bottom: 10px;
+}
+
+.import-dropzone.drag-active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.import-dropzone-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.import-dropzone-sub {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 6px;
+}
+
+.import-browse-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.import-summary-card {
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+
+.import-summary-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.import-summary-coordinator {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.import-summary-meta {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
+.import-chips-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.import-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.import-chip.new {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.import-chip.changed {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.import-chip.unchanged {
+  background: var(--slate-bg);
+  color: var(--slate);
+}
+
+.import-warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-bg);
+  color: var(--amber);
+  font-size: 12.5px;
+}
+
+.import-warning-banner svg {
+  flex-shrink: 0;
+}
+
+.import-bulk-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.import-section {
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.import-section-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-section-count {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  background: var(--slate-bg);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.import-change-group {
+  padding: 12px 0;
+  border-top: 1px solid var(--line-2);
+}
+
+.import-change-group:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.import-change-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+}
+
+.import-change-group-site {
+  color: var(--ink-2);
+}
+
+.import-locked-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-bg);
+  color: var(--amber);
+  font-size: 12.5px;
+  margin-bottom: 8px;
+}
+
+.import-change-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.import-change-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.import-change-row.disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+.import-change-field {
+  font-weight: 600;
+  min-width: 140px;
+}
+
+.import-change-value {
+  color: var(--ink-2);
+}
+
+.import-change-value.new {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.import-conflict-msg {
+  color: var(--amber);
+  margin-left: auto;
+}
+
+.import-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}

@@ -178,6 +178,8 @@ const CONTRACTORS = ['In-House', 'Connect', 'Upper Telecom', 'El-khayal', 'New P
 const TXRF_OPTIONS = ['TX', 'RF'];
 const TASK_NAMES = ['ROT', 'Hu swap', 'Link upgrade', 'POC3 integration & cutover', 'New Physical Sites', 'Fixed Account', 'Upgrade-Time SYNC', 'Upgrade-IDU Upgrade'];
 const STATUS_OPTIONS = ['Assigned', 'Done', 'Cancelled'];
+const ACCEPTANCE_STATUSES = ['REJ', 'PAC', 'PAC for Ever', 'TOC', 'FAC'];
+const PO_STATUSES = ['Sent', 'Partially Received', 'Received'];
 const TASKS_PAGE_SIZE = 50;
 
 let taskListCache = [];
@@ -190,11 +192,7 @@ function renderTasks() {
   if (user.role === 'coordinator') {
     renderCoordinatorTaskList();
   } else {
-    document.getElementById('page-content').innerHTML = `
-      <div class="fade-in" style="padding:26px">
-        <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.01em;color:var(--ink)">All Tasks</h1>
-        <p style="color:var(--ink-2);font-size:13px;margin-top:8px">Master task view is built in a later stage.</p>
-      </div>`;
+    renderMasterTaskList();
   }
 }
 
@@ -468,16 +466,749 @@ async function handleDeleteTask(id) {
 }
 
 /* ==========================================================================
+   Master table — PM / AM / CCM view
+   ========================================================================== */
+
+const COORDINATOR_COLUMNS = [
+  { key: 'id', label: 'ID #', width: 168, type: 'mono', alwaysVisible: true },
+  { key: 'physical_site_id', label: 'Physical Site', width: 110, type: 'mono', alwaysVisible: true },
+  { key: 'job_code', label: 'Job Code', width: 110, type: 'mono', alwaysVisible: true },
+  { key: 'tx_rf', label: 'TX/RF', width: 64, type: 'text', defaultVisible: true },
+  { key: 'vendor', label: 'Vendor', width: 90, type: 'text', defaultVisible: true },
+  { key: 'region', label: 'Region', width: 78, type: 'text', defaultVisible: true },
+  { key: 'sub_region', label: 'Sub Region', width: 100, type: 'text' },
+  { key: 'logical_site_id', label: 'Logical Site ID', width: 110, type: 'text' },
+  { key: 'site_option', label: 'Site Option', width: 90, type: 'text' },
+  { key: 'facing', label: 'Facing', width: 90, type: 'text' },
+  { key: 'distance', label: 'Distance', width: 110, type: 'text' },
+  { key: 'task_name', label: 'Task Name', width: 150, type: 'text', defaultVisible: true },
+  { key: 'main_task', label: 'Main Task', width: 120, type: 'text' },
+  { key: 'contractor', label: 'Contractor', width: 120, type: 'text', alwaysVisible: true },
+  { key: 'engineer_name', label: 'Engineer Name', width: 130, type: 'text' },
+  { key: 'line_item_code', label: 'Line Item', width: 96, type: 'mono', alwaysVisible: true },
+  { key: 'absolute_quantity', label: 'Abs Qty', width: 90, type: 'num' },
+  { key: 'actual_quantity', label: 'Act Qty', width: 72, type: 'num', alwaysVisible: true },
+  { key: 'new_price', label: 'Price', width: 100, type: 'num' },
+  { key: 'new_total_price', label: 'Total (EGP)', width: 112, type: 'money', defaultVisible: true },
+  { key: 'general_stream', label: 'General Stream', width: 130, type: 'text' },
+  { key: 'vf_task_owner', label: 'VF Task Owner', width: 110, type: 'text' },
+  { key: 'prq', label: 'PRQ', width: 80, type: 'text' },
+  { key: 'pc', label: 'PC', width: 80, type: 'text' },
+  { key: 'status', label: 'Status', width: 104, type: 'badge', alwaysVisible: true },
+  { key: 'task_date', label: 'Task Date', width: 100, type: 'date' },
+  { key: 'done_date', label: 'Done Date', width: 100, type: 'date', alwaysVisible: true },
+  { key: 'comments', label: 'Comments', width: 160, type: 'text' }
+];
+
+const PM_COLUMNS = [
+  { key: 'acceptance_status', label: 'Acceptance', width: 110, type: 'select', options: ACCEPTANCE_STATUSES, alwaysVisible: true },
+  { key: 'fac_date', label: 'FAC Date', width: 100, type: 'date' },
+  { key: 'certificate_no', label: 'Certificate #', width: 110, type: 'text' },
+  { key: 'acceptance_week', label: 'Acceptance Wk', width: 110, type: 'text' },
+  { key: 'tsr_sub_no', label: 'TSR Sub#', width: 100, type: 'text' },
+  { key: 'po_status', label: 'PO Status', width: 120, type: 'select', options: PO_STATUSES, defaultVisible: true },
+  { key: 'po_number', label: 'PO Number', width: 110, type: 'text' },
+  { key: 'vf_invoice_no', label: 'VF Invoice #', width: 120, type: 'text', defaultVisible: true },
+  { key: 'first_receiving_date', label: '1st Receiving', width: 110, type: 'date' },
+  { key: 'lmp_portion', label: 'LMP Portion', width: 110, type: 'num', defaultVisible: true, overrideKey: 'lmp_portion_overridden' },
+  { key: 'contractor_portion', label: 'Ctr Portion', width: 110, type: 'num', defaultVisible: true, overrideKey: 'contractor_portion_overridden' },
+  { key: 'sent_to_cost_control', label: 'Sent to CC', width: 100, type: 'date' },
+  { key: 'received_from_cost_control', label: 'Received from CC', width: 130, type: 'date' },
+  { key: 'contractor_invoice_no', label: 'Ctr Invoice #', width: 120, type: 'text' },
+  { key: 'contractor_invoice_submission_date', label: 'Ctr Invoice Sub', width: 120, type: 'date' },
+  { key: 'vf_invoice_submission_date', label: 'VF Invoice Sub', width: 120, type: 'date' },
+  { key: 'cash_received_date', label: 'Cash Received', width: 110, type: 'date' }
+];
+
+const ALL_MASTER_COLUMNS = [...COORDINATOR_COLUMNS, ...PM_COLUMNS];
+const PM_FIELD_META_MAP = Object.fromEntries(PM_COLUMNS.map(c => [c.key, c]));
+const MASTER_COLUMNS_SETTINGS_KEY = 'master_table_columns';
+const MASTER_BADGE_PALETTE = ['#2563eb', '#7c3aed', '#0d9488', '#dc2626', '#d97706', '#0e7490', '#65a30d', '#be185d'];
+
+let masterTaskCache = [];
+let coordinatorBadgeMap = {};
+let masterTableState = {
+  search: '', status: '', region: '', vendor: '', coordinator: '', acceptanceStatus: '', txrf: '',
+  quickFilter: '',
+  sortField: 'done_date', sortDir: 'desc',
+  visibleCount: TASKS_PAGE_SIZE,
+  selectedIds: new Set(),
+  visibleColumns: {},
+  columnsMenuOpen: false
+};
+
+function coordinatorBadgeColor(name) {
+  if (!name) return '#64748b';
+  if (!coordinatorBadgeMap[name]) {
+    const idx = Object.keys(coordinatorBadgeMap).length % MASTER_BADGE_PALETTE.length;
+    coordinatorBadgeMap[name] = MASTER_BADGE_PALETTE[idx];
+  }
+  return coordinatorBadgeMap[name];
+}
+
+async function loadMasterColumnVisibility() {
+  const saved = await db.app_settings.get(MASTER_COLUMNS_SETTINGS_KEY);
+  const savedValue = (saved && saved.value) || {};
+  const visibility = {};
+  ALL_MASTER_COLUMNS.forEach(col => {
+    if (col.alwaysVisible) {
+      visibility[col.key] = true;
+    } else if (Object.prototype.hasOwnProperty.call(savedValue, col.key)) {
+      visibility[col.key] = !!savedValue[col.key];
+    } else {
+      visibility[col.key] = !!col.defaultVisible;
+    }
+  });
+  return visibility;
+}
+
+async function saveMasterColumnVisibility(visibility) {
+  const toSave = {};
+  ALL_MASTER_COLUMNS.forEach(col => {
+    if (!col.alwaysVisible) toSave[col.key] = !!visibility[col.key];
+  });
+  await db.app_settings.put({ key: MASTER_COLUMNS_SETTINGS_KEY, value: toSave, updated_at: new Date() });
+}
+
+async function renderMasterTaskList() {
+  masterTaskCache = await getAllTasks();
+  masterTableState.visibleCount = TASKS_PAGE_SIZE;
+  masterTableState.selectedIds = new Set();
+  masterTableState.visibleColumns = await loadMasterColumnVisibility();
+
+  const container = document.getElementById('page-content');
+  container.innerHTML = masterListShellHtml();
+  attachMasterListShellEvents();
+  renderMasterTableSection();
+}
+
+function distinctMasterValues(field) {
+  return Array.from(new Set(masterTaskCache.map(t => t[field]).filter(Boolean))).sort();
+}
+
+function masterListShellHtml() {
+  const totalValue = round2(masterTaskCache.reduce((sum, t) => sum + (t.new_total_price || 0), 0));
+  return `
+    <div class="fade-in tasks-page master-page">
+      <div class="tasks-page-header">
+        <div>
+          <h1>All Tasks</h1>
+          <p class="tasks-subtitle">${masterTaskCache.length} task${masterTaskCache.length === 1 ? '' : 's'} · ${formatMoney(totalValue) || 0} EGP total</p>
+        </div>
+        <div class="tasks-page-header-actions">
+          <div class="master-columns-wrap">
+            <button id="master-columns-btn" class="btn ghost sm">${iconSvg('rows', 14)}<span>Columns</span></button>
+            <div id="master-columns-menu" class="master-columns-menu card scale-in hidden"></div>
+          </div>
+        </div>
+      </div>
+      <div class="tasks-filters-bar">
+        <div class="tasks-search-wrap">
+          ${iconSvg('search', 15)}
+          <input id="master-search" class="input tasks-search" type="text" placeholder="Search Site ID, Job Code, Task Name, Engineer…">
+        </div>
+        <select id="master-filter-status" class="select tasks-filter">
+          <option value="">All Status</option>
+          ${STATUS_OPTIONS.map(s => `<option value="${s}">${s}</option>`).join('')}
+        </select>
+        <select id="master-filter-region" class="select tasks-filter">
+          <option value="">All Regions</option>
+          ${REGIONS.map(r => `<option value="${r}">${r}</option>`).join('')}
+        </select>
+        <select id="master-filter-vendor" class="select tasks-filter">
+          <option value="">All Vendors</option>
+          ${distinctMasterValues('vendor').map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}
+        </select>
+        <select id="master-filter-coordinator" class="select tasks-filter">
+          <option value="">All Coordinators</option>
+          ${distinctMasterValues('coordinator_name').map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+        </select>
+        <select id="master-filter-acceptance" class="select tasks-filter">
+          <option value="">All Acceptance</option>
+          ${ACCEPTANCE_STATUSES.map(a => `<option value="${a}">${a}</option>`).join('')}
+        </select>
+        <select id="master-filter-txrf" class="select tasks-filter">
+          <option value="">All TX/RF</option>
+          ${TXRF_OPTIONS.map(t => `<option value="${t}">${t}</option>`).join('')}
+        </select>
+        <select id="master-filter-quick" class="select tasks-filter">
+          <option value="">No Quick Filter</option>
+          <option value="missing_price">Missing price</option>
+          <option value="locked">Locked only</option>
+          <option value="done_no_acceptance">Done, no acceptance</option>
+        </select>
+      </div>
+      <div id="master-table-section" class="tasks-table-section master-table-section"></div>
+    </div>`;
+}
+
+function handleDocumentClickForColumnsMenu(e) {
+  const wrap = document.querySelector('.master-columns-wrap');
+  if (!wrap) return;
+  if (!wrap.contains(e.target)) {
+    const menu = document.getElementById('master-columns-menu');
+    if (menu && !menu.classList.contains('hidden')) {
+      menu.classList.add('hidden');
+      masterTableState.columnsMenuOpen = false;
+    }
+  }
+}
+
+function attachMasterListShellEvents() {
+  document.getElementById('master-columns-btn').addEventListener('click', toggleMasterColumnsMenu);
+  document.removeEventListener('click', handleDocumentClickForColumnsMenu);
+  document.addEventListener('click', handleDocumentClickForColumnsMenu);
+
+  let searchTimer = null;
+  document.getElementById('master-search').addEventListener('input', (e) => {
+    clearTimeout(searchTimer);
+    const value = e.target.value;
+    searchTimer = setTimeout(() => {
+      masterTableState.search = value;
+      masterTableState.visibleCount = TASKS_PAGE_SIZE;
+      renderMasterTableSection();
+    }, 300);
+  });
+
+  const filterMap = {
+    'master-filter-status': 'status',
+    'master-filter-region': 'region',
+    'master-filter-vendor': 'vendor',
+    'master-filter-coordinator': 'coordinator',
+    'master-filter-acceptance': 'acceptanceStatus',
+    'master-filter-txrf': 'txrf',
+    'master-filter-quick': 'quickFilter'
+  };
+  Object.keys(filterMap).forEach(id => {
+    document.getElementById(id).addEventListener('change', (e) => {
+      masterTableState[filterMap[id]] = e.target.value;
+      masterTableState.visibleCount = TASKS_PAGE_SIZE;
+      renderMasterTableSection();
+    });
+  });
+}
+
+function masterColumnsMenuHtml() {
+  const groupHtml = (cols, groupLabel) => `
+    <div class="master-columns-group">
+      <div class="master-columns-group-label">${groupLabel}</div>
+      ${cols.map(col => `
+        <label class="master-columns-item${col.alwaysVisible ? ' locked' : ''}">
+          <input type="checkbox" data-col="${col.key}" ${masterTableState.visibleColumns[col.key] ? 'checked' : ''} ${col.alwaysVisible ? 'disabled' : ''}>
+          <span>${escapeHtml(col.label)}</span>
+          ${col.alwaysVisible ? iconSvg('lock', 10) : ''}
+        </label>`).join('')}
+    </div>`;
+
+  return groupHtml(COORDINATOR_COLUMNS, 'Coordinator Fields') + groupHtml(PM_COLUMNS, 'PM Fields');
+}
+
+function toggleMasterColumnsMenu() {
+  const menu = document.getElementById('master-columns-menu');
+  masterTableState.columnsMenuOpen = !masterTableState.columnsMenuOpen;
+
+  if (masterTableState.columnsMenuOpen) {
+    menu.innerHTML = masterColumnsMenuHtml();
+    menu.classList.remove('hidden');
+    menu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', async (e) => {
+        masterTableState.visibleColumns[e.target.dataset.col] = e.target.checked;
+        await saveMasterColumnVisibility(masterTableState.visibleColumns);
+        renderMasterTableSection();
+      });
+    });
+  } else {
+    menu.classList.add('hidden');
+  }
+}
+
+function getVisibleColumnsList() {
+  return ALL_MASTER_COLUMNS.filter(col => masterTableState.visibleColumns[col.key]);
+}
+
+function getFilteredSortedMasterTasks() {
+  const q = masterTableState.search.trim().toLowerCase();
+
+  let rows = masterTaskCache.filter(t => {
+    if (q) {
+      const hay = `${t.physical_site_id || ''} ${t.job_code || ''} ${t.task_name || ''} ${t.engineer_name || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (masterTableState.status && t.status !== masterTableState.status) return false;
+    if (masterTableState.region && t.region !== masterTableState.region) return false;
+    if (masterTableState.vendor && t.vendor !== masterTableState.vendor) return false;
+    if (masterTableState.coordinator && t.coordinator_name !== masterTableState.coordinator) return false;
+    if (masterTableState.acceptanceStatus && t.acceptance_status !== masterTableState.acceptanceStatus) return false;
+    if (masterTableState.txrf && t.tx_rf !== masterTableState.txrf) return false;
+
+    if (masterTableState.quickFilter === 'missing_price' && (t.price_snapshot !== null && t.price_snapshot !== undefined)) return false;
+    if (masterTableState.quickFilter === 'locked' && !t.is_locked) return false;
+    if (masterTableState.quickFilter === 'done_no_acceptance' && !(t.status === 'Done' && !t.acceptance_status)) return false;
+
+    return true;
+  });
+
+  const field = masterTableState.sortField;
+  const colMeta = ALL_MASTER_COLUMNS.find(c => c.key === field);
+  const dir = masterTableState.sortDir === 'asc' ? 1 : -1;
+
+  rows.sort((a, b) => {
+    let av = a[field];
+    let bv = b[field];
+
+    if (colMeta && colMeta.type === 'date') {
+      av = av ? new Date(av).getTime() : 0;
+      bv = bv ? new Date(bv).getTime() : 0;
+    } else if (colMeta && (colMeta.type === 'num' || colMeta.type === 'money')) {
+      av = (av === null || av === undefined || av === '') ? -Infinity : Number(av);
+      bv = (bv === null || bv === undefined || bv === '') ? -Infinity : Number(bv);
+    } else {
+      av = (av || '').toString().toLowerCase();
+      bv = (bv || '').toString().toLowerCase();
+    }
+
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+
+  return rows;
+}
+
+function masterSortIconHtml(field) {
+  if (masterTableState.sortField !== field) return '';
+  const rotated = masterTableState.sortDir === 'asc' ? ' style="transform:rotate(180deg)"' : '';
+  return `<span class="sort-icon"${rotated}>${iconSvg('chevDown', 11)}</span>`;
+}
+
+function masterCellDisplayValue(task, col) {
+  const value = task[col.key];
+
+  if (col.key === 'id') {
+    const color = coordinatorBadgeColor(task.coordinator_name);
+    return `<span class="id-coord-bar" style="background:${color}"></span><span class="mono">${escapeHtml(value)}</span>`;
+  }
+  if (col.type === 'badge') {
+    return statusBadgeHtml(value);
+  }
+  if (col.type === 'money') {
+    const formatted = formatMoney(value);
+    return formatted === null ? `<span style="color:var(--amber)">—</span>` : `<span class="num mono">${formatted}</span>`;
+  }
+  if (col.type === 'num') {
+    if (value === null || value === undefined || value === '') return `<span style="color:var(--ink-3)">—</span>`;
+    return `<span class="num mono">${escapeHtml(String(value))}</span>`;
+  }
+  if (col.type === 'date') {
+    return value ? `<span class="mono" style="color:var(--ink-2)">${formatDate(value)}</span>` : `<span style="color:var(--ink-3)">—</span>`;
+  }
+  if (col.type === 'mono') {
+    return `<span class="mono">${escapeHtml(value || '')}</span>`;
+  }
+  if (value === null || value === undefined || value === '') return `<span style="color:var(--ink-3)">—</span>`;
+  return escapeHtml(String(value));
+}
+
+function masterTableHeadHtml(visibleCols) {
+  const rows = getFilteredSortedMasterTasks();
+  const allChecked = rows.length > 0 && rows.every(t => masterTableState.selectedIds.has(t.id));
+
+  const ths = visibleCols.map(col => {
+    const isPm = !!PM_FIELD_META_MAP[col.key];
+    const lockIcon = col.alwaysVisible ? `<span class="th-lock-icon" title="System-critical — always visible">${iconSvg('lock', 10)}</span>` : '';
+    return `<th class="${isPm ? 'pm-col-header' : ''} sortable" style="width:${col.width}px" data-sort="${col.key}">${escapeHtml(col.label)}${lockIcon}${masterSortIconHtml(col.key)}</th>`;
+  }).join('');
+
+  return `
+    <tr>
+      <th style="width:56px">
+        <span class="row-checkbox${allChecked ? ' checked' : ''}" id="master-select-all">${allChecked ? iconSvg('check', 11) : ''}</span>
+      </th>
+      ${ths}
+    </tr>`;
+}
+
+function masterRowHtml(task, visibleCols) {
+  const lockedClass = task.is_locked ? ' locked-row' : '';
+  const selected = masterTableState.selectedIds.has(task.id);
+  const selectedClass = selected ? ' selected-row' : '';
+
+  const cells = visibleCols.map(col => {
+    const isPm = !!PM_FIELD_META_MAP[col.key];
+    const cellClass = isPm ? 'pm-col-cell' : '';
+    const editableAttr = isPm ? ` data-pm-cell="${col.key}" data-id="${escapeHtml(task.id)}"` : '';
+    return `<td class="${cellClass}"${editableAttr}>${masterCellDisplayValue(task, col)}</td>`;
+  }).join('');
+
+  const lockIconHtml = task.is_locked
+    ? `<span class="lock-icon" title="${escapeHtml(task.lock_reason || 'Locked')}">${iconSvg('lock', 13)}</span>`
+    : '';
+
+  return `
+    <tr class="data-row${lockedClass}${selectedClass}" data-id="${escapeHtml(task.id)}">
+      <td class="master-checkbox-cell">
+        <span class="row-checkbox${selected ? ' checked' : ''}" data-action="select-row" data-id="${escapeHtml(task.id)}">${selected ? iconSvg('check', 11) : ''}</span>
+        ${lockIconHtml}
+      </td>
+      ${cells}
+    </tr>`;
+}
+
+function renderMasterTableSection() {
+  const section = document.getElementById('master-table-section');
+  if (!section) return;
+
+  const rows = getFilteredSortedMasterTasks();
+  const visibleCols = getVisibleColumnsList();
+
+  if (rows.length === 0) {
+    section.innerHTML = `
+      <div class="card tasks-table-wrap">
+        <div class="empty-state">
+          ${iconSvg('search', 30)}
+          <div class="empty-state-title">No tasks match these filters.</div>
+          <div class="empty-state-desc">Try adjusting filters or search.</div>
+        </div>
+      </div>
+      <div id="master-bulk-bar-root"></div>`;
+    return;
+  }
+
+  const pageRows = rows.slice(0, masterTableState.visibleCount);
+
+  section.innerHTML = `
+    <div class="card tasks-table-wrap master-table-wrap" id="master-table-wrap">
+      <table class="data-table master-table">
+        <thead id="master-thead">${masterTableHeadHtml(visibleCols)}</thead>
+        <tbody id="master-tbody">
+          ${pageRows.map(t => masterRowHtml(t, visibleCols)).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div id="master-bulk-bar-root"></div>`;
+
+  attachMasterTableEvents(visibleCols);
+  renderMasterBulkBar();
+
+  document.getElementById('master-table-wrap').addEventListener('scroll', handleMasterTableScroll);
+}
+
+function handleMasterTableScroll(e) {
+  const wrap = e.target;
+  if (wrap.scrollTop + wrap.clientHeight < wrap.scrollHeight - 120) return;
+
+  const rows = getFilteredSortedMasterTasks();
+  if (masterTableState.visibleCount >= rows.length) return;
+
+  const visibleCols = getVisibleColumnsList();
+  const nextRows = rows.slice(masterTableState.visibleCount, masterTableState.visibleCount + TASKS_PAGE_SIZE);
+  masterTableState.visibleCount += TASKS_PAGE_SIZE;
+
+  const tbody = document.getElementById('master-tbody');
+  if (tbody) {
+    tbody.insertAdjacentHTML('beforeend', nextRows.map(t => masterRowHtml(t, visibleCols)).join(''));
+    attachMasterRowEvents(visibleCols);
+  }
+}
+
+function attachMasterTableEvents(visibleCols) {
+  attachMasterRowEvents(visibleCols);
+
+  const selectAll = document.getElementById('master-select-all');
+  if (selectAll) {
+    selectAll.addEventListener('click', () => {
+      const rows = getFilteredSortedMasterTasks();
+      const allChecked = rows.length > 0 && rows.every(t => masterTableState.selectedIds.has(t.id));
+      if (allChecked) {
+        rows.forEach(t => masterTableState.selectedIds.delete(t.id));
+      } else {
+        rows.forEach(t => masterTableState.selectedIds.add(t.id));
+      }
+      renderMasterTableSection();
+    });
+  }
+
+  document.querySelectorAll('#master-thead th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const field = th.dataset.sort;
+      if (masterTableState.sortField === field) {
+        masterTableState.sortDir = masterTableState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        masterTableState.sortField = field;
+        masterTableState.sortDir = 'asc';
+      }
+      renderMasterTableSection();
+    });
+  });
+}
+
+function attachMasterRowEvents() {
+  document.querySelectorAll('[data-action="select-row"]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = el.dataset.id;
+      if (masterTableState.selectedIds.has(id)) {
+        masterTableState.selectedIds.delete(id);
+      } else {
+        masterTableState.selectedIds.add(id);
+      }
+      renderMasterTableSection();
+    });
+  });
+
+  document.querySelectorAll('[data-pm-cell]').forEach(cell => {
+    cell.addEventListener('click', () => startInlinePmEdit(cell));
+  });
+}
+
+function startInlinePmEdit(cell) {
+  if (cell.classList.contains('editing')) return;
+
+  const field = cell.dataset.pmCell;
+  const id = cell.dataset.id;
+  const task = masterTaskCache.find(t => t.id === id);
+  if (!task) return;
+
+  const meta = PM_FIELD_META_MAP[field];
+  const originalHtml = cell.innerHTML;
+  cell.classList.add('editing');
+
+  const rawValue = (task[field] === null || task[field] === undefined) ? '' : task[field];
+  let inputHtml;
+
+  if (meta.type === 'select') {
+    inputHtml = `<select class="inline-edit-input select">
+      <option value="">— Select —</option>
+      ${meta.options.map(o => `<option value="${o}" ${rawValue === o ? 'selected' : ''}>${o}</option>`).join('')}
+    </select>`;
+  } else if (meta.type === 'date') {
+    inputHtml = `<input type="date" class="inline-edit-input input" value="${rawValue ? formatDateISO(rawValue) : ''}">`;
+  } else if (meta.type === 'num') {
+    inputHtml = `<input type="number" step="0.01" class="inline-edit-input input num" value="${rawValue}">`;
+  } else {
+    inputHtml = `<input type="text" class="inline-edit-input input" value="${escapeHtml(rawValue)}">`;
+  }
+
+  cell.innerHTML = inputHtml;
+  const input = cell.querySelector('.inline-edit-input');
+  input.focus();
+  if (input.select) input.select();
+
+  let cancelled = false;
+
+  const cancel = () => {
+    cancelled = true;
+    cell.classList.remove('editing');
+    cell.innerHTML = originalHtml;
+  };
+
+  const commit = async () => {
+    if (cancelled) return;
+
+    const newRaw = input.value;
+    const newValue = meta.type === 'num'
+      ? (newRaw === '' ? null : Number(newRaw))
+      : (newRaw === '' ? null : newRaw);
+
+    if (newValue === rawValue) {
+      cell.classList.remove('editing');
+      cell.innerHTML = originalHtml;
+      return;
+    }
+
+    const changes = { [field]: newValue };
+    if (meta.overrideKey) changes[meta.overrideKey] = true;
+
+    const result = await updateTask(id, changes);
+    if (result && result.error) {
+      showToast(result.error, 'error');
+      cell.classList.remove('editing');
+      cell.innerHTML = originalHtml;
+      return;
+    }
+
+    const idx = masterTaskCache.findIndex(t => t.id === id);
+    if (idx !== -1) masterTaskCache[idx] = result;
+    cell.classList.remove('editing');
+    cell.innerHTML = masterCellDisplayValue(result, meta);
+    showToast('Saved.', 'success', 1400);
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      input.blur();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancel();
+    }
+  });
+
+  input.addEventListener('blur', commit);
+}
+
+function renderMasterBulkBar() {
+  const root = document.getElementById('master-bulk-bar-root');
+  if (!root) return;
+
+  const count = masterTableState.selectedIds.size;
+  if (count === 0) {
+    root.innerHTML = '';
+    return;
+  }
+
+  root.innerHTML = `
+    <div class="master-bulk-bar scale-in">
+      <span class="master-bulk-count">${count} selected</span>
+      <span class="master-bulk-divider"></span>
+      <button class="master-bulk-btn" data-bulk="acceptance_status">Set Acceptance Status</button>
+      <button class="master-bulk-btn" data-bulk="fac_date">Set FAC Date</button>
+      <button class="master-bulk-btn" data-bulk="po_status">Set PO Status</button>
+      <button class="master-bulk-btn" data-bulk="vf_invoice_no">Set VF Invoice #</button>
+      <button class="master-bulk-btn" data-bulk="lock">Lock selected</button>
+      <button class="master-bulk-btn master-bulk-close" data-bulk="clear" title="Clear selection">${iconSvg('close', 13)}</button>
+    </div>
+    <div id="bulk-modal-root"></div>`;
+
+  root.querySelectorAll('[data-bulk]').forEach(btn => {
+    btn.addEventListener('click', () => handleBulkAction(btn.dataset.bulk));
+  });
+}
+
+function handleBulkAction(action) {
+  if (action === 'clear') {
+    masterTableState.selectedIds = new Set();
+    renderMasterTableSection();
+    return;
+  }
+  if (action === 'lock') {
+    handleBulkLock();
+    return;
+  }
+  openBulkFieldModal(action);
+}
+
+function bulkFieldModalConfig(action) {
+  const configs = {
+    acceptance_status: { title: 'Set Acceptance Status', type: 'select', options: ACCEPTANCE_STATUSES, label: 'Acceptance Status' },
+    fac_date: { title: 'Set FAC Date', type: 'date', label: 'FAC Date' },
+    po_status: { title: 'Set PO Status', type: 'select', options: PO_STATUSES, label: 'PO Status' },
+    vf_invoice_no: { title: 'Set VF Invoice #', type: 'text', label: 'VF Invoice #' }
+  };
+  return configs[action];
+}
+
+function openBulkFieldModal(action) {
+  const config = bulkFieldModalConfig(action);
+  const root = document.getElementById('bulk-modal-root');
+  if (!root) return;
+
+  const inputHtml = config.type === 'select'
+    ? `<select id="bulk-field-input" class="select">
+        <option value="">— Select —</option>
+        ${config.options.map(o => `<option value="${o}">${o}</option>`).join('')}
+      </select>`
+    : `<input id="bulk-field-input" type="${config.type}" class="input">`;
+
+  root.innerHTML = `
+    <div class="modal-backdrop scale-in" id="bulk-modal-backdrop">
+      <div class="card modal" id="bulk-modal-card">
+        <div class="modal-header">
+          <h2>${config.title}</h2>
+          <button class="icon-btn" id="bulk-modal-close">${iconSvg('close', 16)}</button>
+        </div>
+        <div class="modal-body">
+          <label class="field" for="bulk-field-input">
+            <span class="lbl">${config.label}<span class="req">*</span></span>
+            ${inputHtml}
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="btn ghost" id="bulk-modal-cancel">Cancel</button>
+          <button class="btn primary" id="bulk-modal-apply">Apply to ${masterTableState.selectedIds.size} task${masterTableState.selectedIds.size === 1 ? '' : 's'}</button>
+        </div>
+      </div>
+    </div>`;
+
+  const escHandler = (e) => { if (e.key === 'Escape') close(); };
+  const close = () => {
+    root.innerHTML = '';
+    document.removeEventListener('keydown', escHandler);
+  };
+
+  document.getElementById('bulk-modal-backdrop').addEventListener('click', (e) => { if (e.target.id === 'bulk-modal-backdrop') close(); });
+  document.getElementById('bulk-modal-close').addEventListener('click', close);
+  document.getElementById('bulk-modal-cancel').addEventListener('click', close);
+  document.getElementById('bulk-modal-apply').addEventListener('click', async () => {
+    const value = document.getElementById('bulk-field-input').value;
+    if (!value) { showToast(`${config.label} is required.`, 'error'); return; }
+    await applyBulkFieldUpdate(action, value);
+    close();
+  });
+  document.addEventListener('keydown', escHandler);
+}
+
+const BULK_FIELD_LABELS = {
+  acceptance_status: 'Acceptance status',
+  fac_date: 'FAC date',
+  po_status: 'PO status',
+  vf_invoice_no: 'VF Invoice #'
+};
+
+async function applyBulkFieldUpdate(field, value) {
+  const ids = Array.from(masterTableState.selectedIds);
+  for (const id of ids) {
+    await updateTask(id, { [field]: value });
+  }
+
+  showToast(`${BULK_FIELD_LABELS[field]} set on ${ids.length} task${ids.length === 1 ? '' : 's'}.`, 'success');
+  masterTableState.selectedIds = new Set();
+  masterTaskCache = await getAllTasks();
+  renderMasterTableSection();
+}
+
+async function handleBulkLock() {
+  const ids = Array.from(masterTableState.selectedIds);
+  const toLock = ids.filter(id => {
+    const t = masterTaskCache.find(task => task.id === id);
+    return t && !t.is_locked;
+  });
+
+  if (toLock.length === 0) {
+    showToast('All selected tasks are already locked.', 'info');
+    masterTableState.selectedIds = new Set();
+    renderMasterTableSection();
+    return;
+  }
+
+  for (const id of toLock) {
+    await lockTask(id, 'Bulk locked from master table');
+  }
+
+  showToast(`${toLock.length} task${toLock.length === 1 ? '' : 's'} locked.`, 'success');
+  masterTableState.selectedIds = new Set();
+  masterTaskCache = await getAllTasks();
+  renderMasterTableSection();
+}
+
+/* ==========================================================================
    Task form — add / edit
    ========================================================================== */
 
 async function showTaskForm(taskId) {
   const task = taskId ? await db.tasks.get(taskId) : null;
-  const [lineItems, streams] = await Promise.all([
-    db.catalog_items.filter(i => i.is_active).toArray(),
-    db.general_streams.filter(s => s.is_active).toArray()
+  const doneDate = task ? task.done_date : null;
+  const [lineItemResult, streamResult] = await Promise.all([
+    getLineItemOptionsForDate(doneDate),
+    getActiveStreamNames(doneDate)
   ]);
-  renderTaskForm(task, lineItems, streams);
+  renderTaskForm(
+    task,
+    lineItemResult.items,
+    streamResult.items,
+    lineItemResult.warning === 'no_catalog',
+    streamResult.warning === 'no_stream_list'
+  );
 }
 
 function taskFieldHtml(key, label, type, value, required, disabled) {
@@ -489,9 +1220,10 @@ function taskFieldHtml(key, label, type, value, required, disabled) {
     </label>`;
 }
 
-function selectFieldHtml(key, label, options, value, required, disabled, optionMeta) {
+function selectFieldHtml(key, label, options, value, required, disabled, optionMeta, hintHtml) {
   const opts = options.map(opt => {
-    const labelText = optionMeta ? (optionMeta.find(m => m.code === opt) ? `${opt} — ${optionMeta.find(m => m.code === opt).name}` : opt) : opt;
+    const meta = optionMeta ? optionMeta.find(m => m.code === opt) : null;
+    const labelText = meta ? `${opt} — ${meta.name} — ${formatMoney(meta.price)} EGP` : opt;
     const selected = String(value) === String(opt) ? 'selected' : '';
     return `<option value="${escapeHtml(opt)}" ${selected}>${escapeHtml(labelText)}</option>`;
   }).join('');
@@ -503,6 +1235,7 @@ function selectFieldHtml(key, label, options, value, required, disabled, optionM
         <option value="">— Select —</option>
         ${opts}
       </select>
+      ${hintHtml || ''}
       <span class="field-error" id="error-${key}"></span>
     </label>`;
 }
@@ -531,12 +1264,17 @@ function autoCalcFieldHtml(key, label, value, overridden, required, disabled) {
 }
 
 const CALC_WARNING_MESSAGES = {
-  no_catalog: 'No price catalog found for this line item — price could not be calculated.',
-  no_rule: 'No contractor portion rule found for this contractor — portions could not be calculated.'
+  no_catalog: 'No price catalog found for this line item — price could not be calculated.'
 };
 
-function renderTaskForm(task, lineItems, streams) {
+function renderTaskForm(task, lineItems, streams, noCatalog, noStreamList) {
   const container = document.getElementById('page-content');
+  const noCatalogHint = noCatalog
+    ? `<div class="field-hint-warning">${iconSvg('warn', 12)}<span>No active catalog. Ask PM to upload.</span></div>`
+    : '';
+  const noStreamHint = noStreamList
+    ? `<div class="field-hint-warning">${iconSvg('warn', 12)}<span>No general stream list. Ask PM to upload.</span></div>`
+    : '';
   const isEdit = !!task;
   const locked = !!(task && task.is_locked);
   const v = (key) => (task && task[key] !== undefined && task[key] !== null) ? task[key] : '';
@@ -578,7 +1316,7 @@ function renderTaskForm(task, lineItems, streams) {
             ${selectFieldHtml('region', 'Region', REGIONS, v('region'), true, locked)}
             ${taskFieldHtml('sub_region', 'Sub Region', 'text', v('sub_region'), false, locked)}
             ${selectFieldHtml('distance', 'Distance', DISTANCE_BANDS, v('distance'), true, locked)}
-            ${selectFieldHtml('general_stream', 'General Stream', streams.map(s => s.stream_name), v('general_stream'), true, locked)}
+            ${selectFieldHtml('general_stream', 'General Stream', streams.map(s => s.stream_name), v('general_stream'), true, locked, null, noStreamHint)}
           </div>
         </div>
 
@@ -589,7 +1327,7 @@ function renderTaskForm(task, lineItems, streams) {
             ${selectFieldHtml('task_name', 'Task Name', TASK_NAMES, v('task_name'), true, locked)}
             ${selectFieldHtml('contractor', 'Contractor', CONTRACTORS, v('contractor'), true, locked)}
             ${taskFieldHtml('engineer_name', "Engineer's Name", 'text', v('engineer_name'), true, locked)}
-            ${selectFieldHtml('line_item_code', 'Line Item', lineItems.map(i => i.code), v('line_item_code'), true, locked, lineItems)}
+            ${selectFieldHtml('line_item_code', 'Line Item', lineItems.map(i => i.code), v('line_item_code'), true, locked, lineItems, noCatalogHint)}
             ${taskFieldHtml('absolute_quantity', 'Absolute Quantity', 'number', v('absolute_quantity'), true, locked)}
             ${autoCalcFieldHtml('actual_quantity', 'Actual Quantity', v('actual_quantity') === '' ? null : v('actual_quantity'), overridden.actual_quantity, true, locked)}
           </div>
@@ -928,9 +1666,9 @@ function createBulkRow(overrides) {
 
 async function renderBulkEntryForm() {
   const user = getCurrentUser();
-  const [lineItems, streams, templates, defaultsSetting] = await Promise.all([
-    db.catalog_items.filter(i => i.is_active).toArray(),
-    db.general_streams.filter(s => s.is_active).toArray(),
+  const [lineItemResult, streamResult, templates, defaultsSetting] = await Promise.all([
+    getLineItemOptionsForDate(null),
+    getActiveStreamNames(null),
     db.task_templates.filter(t => t.is_active).toArray(),
     db.app_settings.get(`user_defaults_${user.id}`)
   ]);
@@ -938,8 +1676,10 @@ async function renderBulkEntryForm() {
   const defaults = (defaultsSetting && defaultsSetting.value) || {};
 
   bulkState = {
-    lineItems,
-    streams,
+    lineItems: lineItemResult.items,
+    noCatalog: lineItemResult.warning === 'no_catalog',
+    streams: streamResult.items,
+    noStreamList: streamResult.warning === 'no_stream_list',
     templates,
     defaultTemplateId: defaults.default_template_id || null,
     header: {
@@ -971,7 +1711,7 @@ function bulkDataRows() {
 function bulkLineItemOptionsHtml(selectedCode) {
   return bulkState.lineItems.map(item => {
     const selected = item.code === selectedCode ? 'selected' : '';
-    return `<option value="${escapeHtml(item.code)}" ${selected}>${escapeHtml(item.code)} — ${escapeHtml(item.name)}</option>`;
+    return `<option value="${escapeHtml(item.code)}" ${selected}>${escapeHtml(item.code)} — ${escapeHtml(item.name)} — ${formatMoney(item.price)} EGP</option>`;
   }).join('');
 }
 
@@ -1033,7 +1773,7 @@ function bulkEntryPageHtml() {
             ${selectFieldHtml('contractor', 'Contractor', CONTRACTORS, h.contractor, true)}
             ${taskFieldHtml('engineer_name', 'Engineer Name', 'text', h.engineer_name, true)}
             ${taskFieldHtml('vf_task_owner', 'VF Task Owner', 'text', h.vf_task_owner, false)}
-            ${selectFieldHtml('general_stream', 'General Stream', streamNames, h.general_stream, true)}
+            ${selectFieldHtml('general_stream', 'General Stream', streamNames, h.general_stream, true, false, null, bulkState.noStreamList ? `<div class="field-hint-warning">${iconSvg('warn', 12)}<span>No general stream list. Ask PM to upload.</span></div>` : '')}
           </div>
           <div class="bulk-template-row">
             <div class="bulk-template-group">
@@ -1055,6 +1795,7 @@ function bulkEntryPageHtml() {
 
         <div class="form-section card">
           <div class="form-section-title">Line Items</div>
+          ${bulkState.noCatalog ? `<div class="calc-warning" style="margin-bottom:10px">${iconSvg('warn', 14)}<span>No active catalog. Ask PM to upload.</span></div>` : ''}
           <div class="tasks-table-wrap">
             <table class="data-table bulk-items-table">
               <thead>
@@ -1478,4 +2219,5 @@ window.getMyTasks = getMyTasks;
 window.getAllTasks = getAllTasks;
 window.getDeletedTasks = getDeletedTasks;
 window.renderTasks = renderTasks;
+window.renderMasterTaskList = renderMasterTaskList;
 window.renderTaskForm = renderTaskForm;

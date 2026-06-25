@@ -10,35 +10,13 @@ function round2(n) {
   return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 }
 
-async function getPriceForDate(lineItemCode, doneDate) {
-  const priceDate = doneDate ? new Date(doneDate) : new Date();
-  const catalogs = await db.catalogs.toArray();
-
-  if (catalogs.length === 0) {
-    return { price: null, warning: 'no_catalog' };
-  }
-
-  const eligible = catalogs.filter(c => new Date(c.valid_from) <= priceDate);
-  const pool = eligible.length > 0 ? eligible : catalogs;
-  const catalog = pool.reduce((latest, c) => new Date(c.valid_from) > new Date(latest.valid_from) ? c : latest);
-
-  const items = await db.catalog_items.where('catalog_id').equals(catalog.id).toArray();
-  const item = items.find(i => i.code === lineItemCode && i.is_active);
-
-  if (!item) {
-    return { price: null, warning: 'no_catalog' };
-  }
-
-  return { price: item.price, catalogYear: catalog.year, catalogId: catalog.id };
-}
-
 async function getPortionForDate(contractorName, doneDate) {
   const ruleDate = doneDate ? new Date(doneDate) : new Date();
   const rules = await db.contractor_portions.where('contractor_name').equals(contractorName).toArray();
   const eligible = rules.filter(r => new Date(r.valid_from) <= ruleDate);
 
   if (eligible.length === 0) {
-    return { lmpPct: null, warning: 'no_rule' };
+    return { lmpPct: null, warning: `No portion rule for ${contractorName}. Portions will be empty.` };
   }
 
   const rule = eligible.reduce((latest, r) => new Date(r.valid_from) > new Date(latest.valid_from) ? r : latest);
@@ -119,7 +97,6 @@ async function calculateTaskFinancials(task) {
   };
 }
 
-window.getPriceForDate = getPriceForDate;
 window.getPortionForDate = getPortionForDate;
 window.getDistanceMultiplier = getDistanceMultiplier;
 window.calculateTaskFinancials = calculateTaskFinancials;

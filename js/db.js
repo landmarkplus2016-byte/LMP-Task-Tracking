@@ -23,8 +23,8 @@ async function runSeed() {
 
 async function purgeSoftDeleted() {
   const cutoff = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
-  const candidates = await db.tasks.where('is_deleted').equals(true).toArray();
-  const toPurge = candidates.filter(t => t.deleted_at && new Date(t.deleted_at) < cutoff);
+  const allTasks = await db.tasks.toArray();
+  const toPurge = allTasks.filter(t => t.is_deleted && t.deleted_at && new Date(t.deleted_at) < cutoff);
   const ids = toPurge.map(t => t.id);
 
   if (ids.length) {
