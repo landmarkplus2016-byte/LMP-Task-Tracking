@@ -12,7 +12,17 @@ const ICONS = {
   download: 'M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4m7 14 5-5-5-5m5 5H9',
   chevRight: 'M9 6l6 6-6 6',
-  layers: 'M12 2 2 7l10 5 10-5-10-5Zm10 12-10 5L2 14'
+  chevLeft: 'M15 6l-6 6 6 6',
+  chevDown: 'M6 9l6 6 6-6',
+  layers: 'M12 2 2 7l10 5 10-5-10-5Zm10 12-10 5L2 14',
+  add: 'M12 5v14M5 12h14',
+  edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z',
+  trash: 'M3 6h18M8 6V4h8v2m-9 0v14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6',
+  lock: 'M5 11h14v10H5V11Zm2 0V7a5 5 0 0 1 10 0v4',
+  unlock: 'M5 11h14v10H5V11Zm2 0V7a5 5 0 0 1 9.5-2',
+  calc: 'M5 3h14v18H5V3Zm3 4h8M8 11h2m3 0h2M8 15h2m3 0h2M8 19h2',
+  warn: 'M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
+  check: 'M20 6 9 17l-5-5'
 };
 
 const ROUTES = {
@@ -256,10 +266,6 @@ function renderDashboard() {
   document.getElementById('page-content').innerHTML = '<h1>Dashboard</h1>';
 }
 
-function renderTasks() {
-  document.getElementById('page-content').innerHTML = '<h1>Tasks</h1>';
-}
-
 function renderImport() {
   document.getElementById('page-content').innerHTML = '<h1>Import</h1>';
 }
@@ -313,7 +319,6 @@ document.addEventListener('DOMContentLoaded', init);
 window.navigateTo = navigateTo;
 window.renderNav = renderNav;
 window.renderDashboard = renderDashboard;
-window.renderTasks = renderTasks;
 window.renderImport = renderImport;
 window.renderReports = renderReports;
 window.renderSettings = renderSettings;
