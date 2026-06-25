@@ -6,6 +6,7 @@ const SETTINGS_SECTIONS = [
   { key: 'price-catalog', label: 'Price Catalog', roles: null },
   { key: 'general-stream', label: 'General Stream', roles: ['project_manager'] },
   { key: 'contractor-portions', label: 'Contractor Portions', roles: ['project_manager'] },
+  { key: 'sync', label: 'Sync & Shared Folder', roles: MASTER_ROLES },
   { key: 'import-history', label: 'Import History', roles: ['project_manager'] }
 ];
 
@@ -72,6 +73,8 @@ function renderActiveSettingsSection() {
     renderGeneralStreamSettings('settings-content');
   } else if (key === 'contractor-portions') {
     renderContractorPortionsSettings();
+  } else if (key === 'sync') {
+    renderSyncSettings();
   } else if (key === 'import-history') {
     renderImportHistorySettings();
   }

@@ -235,9 +235,12 @@ function renderTopbar() {
 function renderAppShell() {
   const app = document.getElementById('app');
   app.innerHTML = `
+    <div id="global-banner-root"></div>
     <header id="page-topbar" class="topbar"></header>
     <main id="page-content" class="page-content"></main>`;
   renderTopbar();
+  if (typeof window.checkPendingSyncFailure === 'function') window.checkPendingSyncFailure();
+  if (typeof window.renderSyncStartupBanner === 'function') window.renderSyncStartupBanner();
 }
 
 function navigateTo(hash) {
