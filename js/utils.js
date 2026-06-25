@@ -101,6 +101,28 @@ function parseCSV(csvString) {
   return { data: result.data, errors: result.errors };
 }
 
+const TOAST_ICONS = { success: 'check', error: 'close', warning: 'warn', info: 'check' };
+
+function showToast(message, type, duration) {
+  const toastType = type || 'info';
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${toastType} scale-in`;
+  toast.innerHTML = `
+    <span class="toast-icon">${iconSvg(TOAST_ICONS[toastType] || 'check', 16)}</span>
+    <span>${escapeHtml(message)}</span>`;
+
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), duration || 3200);
+}
+
 window.hashPassword = hashPassword;
 window.escapeHtml = escapeHtml;
 window.generateTaskId = generateTaskId;
@@ -110,3 +132,4 @@ window.formatDate = formatDate;
 window.formatDateISO = formatDateISO;
 window.formatMoney = formatMoney;
 window.parseCSV = parseCSV;
+window.showToast = showToast;

@@ -221,7 +221,12 @@ function coordinatorListShellHtml() {
           <h1>My Tasks</h1>
           <p class="tasks-subtitle">${taskListCache.length} task${taskListCache.length === 1 ? '' : 's'}</p>
         </div>
-        <button id="add-task-btn" class="btn primary">${iconSvg('add', 15)}<span>Add Task</span></button>
+        <div class="tasks-page-header-actions">
+          <button id="export-json-btn" class="btn ghost sm">${iconSvg('download', 14)}<span>Export JSON</span></button>
+          <button id="export-excel-btn" class="btn ghost sm">${iconSvg('download', 14)}<span>Export Excel</span></button>
+          <button id="bulk-entry-btn" class="btn ghost">${iconSvg('layers', 15)}<span>Bulk Entry</span></button>
+          <button id="add-task-btn" class="btn primary">${iconSvg('add', 15)}<span>Add Task</span></button>
+        </div>
       </div>
       <div class="tasks-filters-bar">
         <div class="tasks-search-wrap">
@@ -402,6 +407,9 @@ function renderTaskTableSection() {
 
 function attachTaskListShellEvents() {
   document.getElementById('add-task-btn').addEventListener('click', () => showTaskForm(null));
+  document.getElementById('bulk-entry-btn').addEventListener('click', () => renderBulkEntryForm());
+  document.getElementById('export-json-btn').addEventListener('click', () => exportCoordinatorJSON());
+  document.getElementById('export-excel-btn').addEventListener('click', () => exportCoordinatorExcel());
 
   let searchTimer = null;
   document.getElementById('task-search').addEventListener('input', (e) => {
@@ -889,6 +897,576 @@ async function handleTaskFormSubmit(e, taskId) {
 
   await renderCoordinatorTaskList();
 }
+
+/* ==========================================================================
+   Bulk entry — one site header + N line items
+   ========================================================================== */
+
+const BULK_HEADER_REQUIRED = ['job_code', 'tx_rf', 'vendor', 'physical_site_id', 'region', 'distance', 'contractor', 'engineer_name', 'general_stream'];
+const BULK_HEADER_KEYS = ['job_code', 'tx_rf', 'vendor', 'physical_site_id', 'logical_site_id', 'site_option', 'facing', 'region', 'sub_region', 'distance', 'contractor', 'engineer_name', 'vf_task_owner', 'general_stream'];
+const BULK_ROW_REQUIRED = ['line_item_code', 'absolute_quantity', 'actual_quantity', 'status'];
+
+let bulkState = null;
+
+function createBulkRow(overrides) {
+  return Object.assign({
+    line_item_code: '',
+    absolute_quantity: null,
+    actual_quantity: null,
+    actual_quantity_overridden: false,
+    status: '',
+    done_date: null,
+    comments: '',
+    new_price: null,
+    new_total_price: null,
+    catalog_year: null,
+    portion_rule_id: null,
+    lmp_portion: null,
+    contractor_portion: null
+  }, overrides || {});
+}
+
+async function renderBulkEntryForm() {
+  const user = getCurrentUser();
+  const [lineItems, streams, templates, defaultsSetting] = await Promise.all([
+    db.catalog_items.filter(i => i.is_active).toArray(),
+    db.general_streams.filter(s => s.is_active).toArray(),
+    db.task_templates.filter(t => t.is_active).toArray(),
+    db.app_settings.get(`user_defaults_${user.id}`)
+  ]);
+
+  const defaults = (defaultsSetting && defaultsSetting.value) || {};
+
+  bulkState = {
+    lineItems,
+    streams,
+    templates,
+    defaultTemplateId: defaults.default_template_id || null,
+    header: {
+      job_code: '',
+      tx_rf: defaults.tx_rf || '',
+      vendor: defaults.vendor || '',
+      physical_site_id: '',
+      logical_site_id: '',
+      site_option: '',
+      facing: '',
+      region: defaults.region || '',
+      sub_region: defaults.sub_region || '',
+      distance: defaults.distance || '',
+      contractor: defaults.contractor || '',
+      engineer_name: defaults.engineer_name || '',
+      vf_task_owner: defaults.vf_task_owner || '',
+      general_stream: defaults.general_stream || ''
+    },
+    rows: [createBulkRow()]
+  };
+
+  renderBulkEntryPage();
+}
+
+function bulkDataRows() {
+  return bulkState.rows.filter(r => r.line_item_code || r.absolute_quantity);
+}
+
+function bulkLineItemOptionsHtml(selectedCode) {
+  return bulkState.lineItems.map(item => {
+    const selected = item.code === selectedCode ? 'selected' : '';
+    return `<option value="${escapeHtml(item.code)}" ${selected}>${escapeHtml(item.code)} — ${escapeHtml(item.name)}</option>`;
+  }).join('');
+}
+
+function bulkRowHtml(row, idx) {
+  const doneDateVal = row.done_date ? formatDateISO(row.done_date) : '';
+  const priceText = (row.new_total_price === null || row.new_total_price === undefined) ? '—' : formatMoney(row.new_total_price);
+  const actQtyCellClass = row.actual_quantity_overridden ? ' cell-overridden' : '';
+
+  return `
+    <tr data-row="${idx}">
+      <td class="bulk-row-num mono">${idx + 1}</td>
+      <td>
+        <select class="select" data-row="${idx}" data-field="line_item_code">
+          <option value="">— Select —</option>
+          ${bulkLineItemOptionsHtml(row.line_item_code)}
+        </select>
+      </td>
+      <td><input type="number" step="0.01" class="input num mono" data-row="${idx}" data-field="absolute_quantity" value="${row.absolute_quantity === null || row.absolute_quantity === undefined ? '' : row.absolute_quantity}"></td>
+      <td class="${actQtyCellClass}"><input type="number" step="0.01" class="input num mono" data-row="${idx}" data-field="actual_quantity" value="${row.actual_quantity === null || row.actual_quantity === undefined ? '' : row.actual_quantity}"></td>
+      <td>
+        <select class="select" data-row="${idx}" data-field="status">
+          <option value="">— Select —</option>
+          ${STATUS_OPTIONS.map(s => `<option value="${s}" ${row.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td><input type="date" class="input" data-row="${idx}" data-field="done_date" value="${doneDateVal}"></td>
+      <td class="num-col mono bulk-price-cell">${priceText}</td>
+      <td><input type="text" class="input" data-row="${idx}" data-field="comments" value="${escapeHtml(row.comments || '')}"></td>
+      <td><button type="button" class="icon-btn sm-icon-btn" data-action="remove-row" data-row="${idx}" title="Remove row">${iconSvg('trash', 13)}</button></td>
+    </tr>`;
+}
+
+function bulkEntryPageHtml() {
+  const h = bulkState.header;
+  const streamNames = bulkState.streams.map(s => s.stream_name);
+
+  return `
+    <div class="fade-in task-form-page">
+      <div class="task-form-header">
+        <h1>Bulk Entry</h1>
+        <p class="tasks-subtitle">Add multiple line items for one site</p>
+      </div>
+      <div class="task-form-grid">
+        <div class="form-section card">
+          <div class="form-section-title">Site Info</div>
+          <div class="bulk-header-grid grid-5">
+            ${taskFieldHtml('job_code', 'Job Code', 'text', h.job_code, true)}
+            ${selectFieldHtml('tx_rf', 'TX/RF', TXRF_OPTIONS, h.tx_rf, true)}
+            ${taskFieldHtml('vendor', 'Vendor', 'text', h.vendor, true)}
+            ${taskFieldHtml('physical_site_id', 'Physical Site ID', 'text', h.physical_site_id, true)}
+            ${taskFieldHtml('logical_site_id', 'Logical Site ID', 'text', h.logical_site_id, false)}
+            ${taskFieldHtml('site_option', 'Site Option', 'text', h.site_option, false)}
+            ${taskFieldHtml('facing', 'Facing', 'text', h.facing, false)}
+            ${selectFieldHtml('region', 'Region', REGIONS, h.region, true)}
+            ${taskFieldHtml('sub_region', 'Sub Region', 'text', h.sub_region, false)}
+            ${selectFieldHtml('distance', 'Distance', DISTANCE_BANDS, h.distance, true)}
+          </div>
+          <div class="bulk-header-grid grid-4">
+            ${selectFieldHtml('contractor', 'Contractor', CONTRACTORS, h.contractor, true)}
+            ${taskFieldHtml('engineer_name', 'Engineer Name', 'text', h.engineer_name, true)}
+            ${taskFieldHtml('vf_task_owner', 'VF Task Owner', 'text', h.vf_task_owner, false)}
+            ${selectFieldHtml('general_stream', 'General Stream', streamNames, h.general_stream, true)}
+          </div>
+          <div class="bulk-template-row">
+            <div class="bulk-template-group">
+              <select id="bulk-template-select" class="select">
+                <option value="">Apply Template…</option>
+                ${bulkState.templates.map(t => `<option value="${t.id}" ${String(bulkState.defaultTemplateId) === String(t.id) ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}
+              </select>
+              <button type="button" id="bulk-template-apply-btn" class="btn ghost sm">Apply</button>
+            </div>
+            <div class="bulk-fill-group">
+              <select id="bulk-fill-status" class="select">
+                <option value="">Fill same status…</option>
+                ${STATUS_OPTIONS.map(s => `<option value="${s}">${s}</option>`).join('')}
+              </select>
+              <input type="date" id="bulk-fill-date" class="input" title="Fill same date for all rows">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section card">
+          <div class="form-section-title">Line Items</div>
+          <div class="tasks-table-wrap">
+            <table class="data-table bulk-items-table">
+              <thead>
+                <tr>
+                  <th style="width:32px">#</th>
+                  <th>Line Item<span class="req">*</span></th>
+                  <th style="width:90px">Abs Qty<span class="req">*</span></th>
+                  <th style="width:90px">Act Qty<span class="req">*</span></th>
+                  <th style="width:120px">Status<span class="req">*</span></th>
+                  <th style="width:130px">Done Date</th>
+                  <th style="width:104px" class="num-col">Price</th>
+                  <th>Comments</th>
+                  <th style="width:36px"></th>
+                </tr>
+              </thead>
+              <tbody id="bulk-rows-tbody">
+                ${bulkState.rows.map((row, idx) => bulkRowHtml(row, idx)).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="bulk-add-row-wrap">
+            <button type="button" id="bulk-add-row-btn" class="btn ghost sm">${iconSvg('add', 13)}<span>Add row</span></button>
+          </div>
+          <div id="bulk-price-preview" class="bulk-price-preview"></div>
+        </div>
+
+        <div class="task-form-footer">
+          <button type="button" id="bulk-cancel-btn" class="btn ghost">Cancel</button>
+          <button type="button" id="bulk-save-btn" class="btn primary">Save all ${bulkDataRows().length} tasks</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderBulkEntryPage() {
+  document.getElementById('page-content').innerHTML = bulkEntryPageHtml();
+  attachBulkEntryEvents();
+  renderPricePreview();
+}
+
+function updateBulkSaveButtonLabel() {
+  const btn = document.getElementById('bulk-save-btn');
+  if (btn) btn.textContent = `Save all ${bulkDataRows().length} tasks`;
+}
+
+function renderPricePreview() {
+  updateBulkSaveButtonLabel();
+
+  const el = document.getElementById('bulk-price-preview');
+  if (!el) return;
+
+  const dataRows = bulkDataRows();
+  const doneRows = dataRows.filter(r => r.status === 'Done');
+  const assignedRows = dataRows.filter(r => r.status === 'Assigned');
+  const doneTotal = round2(doneRows.reduce((sum, r) => sum + (r.new_total_price || 0), 0));
+
+  const parts = [
+    `Done: ${doneRows.length} item${doneRows.length === 1 ? '' : 's'}${doneRows.length ? ` = ${formatMoney(doneTotal)} EGP` : ''}`,
+    `Assigned: ${assignedRows.length} item${assignedRows.length === 1 ? '' : 's'}`,
+    `Total rows: ${dataRows.length}`
+  ];
+
+  el.textContent = parts.join('  |  ');
+}
+
+function renderBulkRowsTable() {
+  const tbody = document.getElementById('bulk-rows-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = bulkState.rows.map((row, idx) => bulkRowHtml(row, idx)).join('');
+  renderPricePreview();
+}
+
+async function computeBulkRowFinancials(idx) {
+  const row = bulkState.rows[idx];
+  if (!row) return;
+
+  if (!row.line_item_code) {
+    row.new_price = null;
+    row.new_total_price = null;
+    row.lmp_portion = null;
+    row.contractor_portion = null;
+    return;
+  }
+
+  const result = await calculateTaskFinancials({
+    line_item_code: row.line_item_code,
+    absolute_quantity: row.absolute_quantity || 0,
+    distance: getRawField('distance'),
+    done_date: row.done_date,
+    contractor: getRawField('contractor'),
+    new_price_overridden: false,
+    actual_quantity: row.actual_quantity,
+    actual_quantity_overridden: row.actual_quantity_overridden,
+    new_total_price_overridden: false,
+    lmp_portion_overridden: false,
+    contractor_portion_overridden: false
+  });
+
+  row.new_price = result.price_snapshot;
+  if (!row.actual_quantity_overridden) row.actual_quantity = result.actual_quantity;
+  row.new_total_price = result.new_total_price;
+  row.lmp_portion = result.lmp_portion;
+  row.contractor_portion = result.contractor_portion;
+  row.catalog_year = result.catalog_year;
+  row.portion_rule_id = result.portion_rule_id;
+}
+
+function updateRowCalculatedCellsDOM(idx) {
+  const row = bulkState.rows[idx];
+  if (!row) return;
+  const tr = document.querySelector(`#bulk-rows-tbody tr[data-row="${idx}"]`);
+  if (!tr) return;
+
+  const actInput = tr.querySelector('[data-field="actual_quantity"]');
+  if (actInput) actInput.value = (row.actual_quantity === null || row.actual_quantity === undefined) ? '' : row.actual_quantity;
+
+  const actCell = actInput ? actInput.closest('td') : null;
+  if (actCell) actCell.classList.toggle('cell-overridden', !!row.actual_quantity_overridden);
+
+  const priceCell = tr.querySelector('.bulk-price-cell');
+  if (priceCell) {
+    priceCell.textContent = (row.new_total_price === null || row.new_total_price === undefined) ? '—' : formatMoney(row.new_total_price);
+  }
+}
+
+async function recalcBulkRowAndUpdateDOM(idx) {
+  await computeBulkRowFinancials(idx);
+  updateRowCalculatedCellsDOM(idx);
+}
+
+async function recalcAllBulkRowsFinancials() {
+  for (let i = 0; i < bulkState.rows.length; i++) {
+    await computeBulkRowFinancials(i);
+  }
+  renderBulkRowsTable();
+}
+
+function maybeAppendBlankRow(idx) {
+  if (idx !== bulkState.rows.length - 1) return;
+  const row = bulkState.rows[idx];
+  const hasData = !!(row.line_item_code || row.absolute_quantity);
+  if (!hasData) return;
+
+  bulkState.rows.push(createBulkRow());
+  const tbody = document.getElementById('bulk-rows-tbody');
+  if (tbody) {
+    const newIdx = bulkState.rows.length - 1;
+    tbody.insertAdjacentHTML('beforeend', bulkRowHtml(bulkState.rows[newIdx], newIdx));
+  }
+}
+
+function removeBulkRow(idx) {
+  if (bulkState.rows.length <= 1) {
+    bulkState.rows[0] = createBulkRow();
+  } else {
+    bulkState.rows.splice(idx, 1);
+  }
+  renderBulkRowsTable();
+}
+
+function applyBulkRowFieldValue(idx, field, value) {
+  const row = bulkState.rows[idx];
+  if (!row) return;
+  if (field === 'absolute_quantity' || field === 'actual_quantity') {
+    row[field] = value === '' ? null : Number(value);
+  } else if (field === 'done_date') {
+    row.done_date = value || null;
+  } else {
+    row[field] = value;
+  }
+}
+
+function handleBulkRowInput(e) {
+  const target = e.target.closest('[data-field]');
+  if (!target) return;
+  applyBulkRowFieldValue(Number(target.dataset.row), target.dataset.field, target.value);
+}
+
+async function handleBulkRowChange(e) {
+  const target = e.target.closest('[data-field]');
+  if (!target) return;
+
+  const idx = Number(target.dataset.row);
+  const field = target.dataset.field;
+
+  applyBulkRowFieldValue(idx, field, target.value);
+  clearBulkRowFieldError(idx, field);
+
+  const row = bulkState.rows[idx];
+
+  if (field === 'actual_quantity') {
+    row.actual_quantity_overridden = true;
+    const cell = target.closest('td');
+    if (cell) cell.classList.add('cell-overridden');
+  }
+
+  if (field === 'line_item_code' || field === 'absolute_quantity' || field === 'done_date') {
+    await recalcBulkRowAndUpdateDOM(idx);
+  }
+
+  maybeAppendBlankRow(idx);
+  renderPricePreview();
+}
+
+function handleBulkRowClick(e) {
+  const btn = e.target.closest('[data-action="remove-row"]');
+  if (!btn) return;
+  removeBulkRow(Number(btn.dataset.row));
+}
+
+function markBulkRowFieldError(idx, field) {
+  const input = document.querySelector(`#bulk-rows-tbody tr[data-row="${idx}"] [data-field="${field}"]`);
+  if (input) input.classList.add('input-error');
+}
+
+function clearBulkRowFieldError(idx, field) {
+  const input = document.querySelector(`#bulk-rows-tbody tr[data-row="${idx}"] [data-field="${field}"]`);
+  if (input) input.classList.remove('input-error');
+}
+
+async function handleApplyTemplate() {
+  const select = document.getElementById('bulk-template-select');
+  const templateId = Number(select.value);
+  if (!templateId) return;
+
+  const items = await db.task_template_items.where('template_id').equals(templateId).sortBy('sort_order');
+  if (items.length === 0) {
+    showToast('This template has no line items.', 'warning');
+    return;
+  }
+
+  bulkState.rows = items.map(item => createBulkRow({
+    line_item_code: item.line_item_code,
+    absolute_quantity: item.default_qty ?? null
+  }));
+  bulkState.rows.push(createBulkRow());
+
+  for (let i = 0; i < bulkState.rows.length - 1; i++) {
+    await computeBulkRowFinancials(i);
+  }
+
+  renderBulkRowsTable();
+}
+
+function handleFillSameStatus(e) {
+  const value = e.target.value;
+  if (!value) return;
+  bulkState.rows.forEach(row => { row.status = value; });
+  renderBulkRowsTable();
+  e.target.value = '';
+}
+
+async function handleFillSameDate(e) {
+  const value = e.target.value || null;
+  bulkState.rows.forEach(row => { row.done_date = value; });
+  await recalcAllBulkRowsFinancials();
+}
+
+function collectBulkHeaderData() {
+  const data = {};
+  BULK_HEADER_KEYS.forEach(key => { data[key] = getRawField(key) || null; });
+  return data;
+}
+
+function validateBulkHeader(header) {
+  const errors = {};
+  BULK_HEADER_REQUIRED.forEach(key => {
+    if (!header[key]) errors[key] = 'Required';
+  });
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+async function validateBulkJobCodeOnBlur() {
+  clearFieldError('job_code');
+
+  const jobCode = getRawField('job_code').trim();
+  const siteId = getRawField('physical_site_id').trim();
+  if (!jobCode || !siteId) return;
+
+  const allTasks = await getAllTasks();
+  const result = validateJobCode(jobCode, siteId, allTasks, null);
+  if (!result.valid) {
+    markFieldError('job_code', result.error);
+  }
+}
+
+function isBulkRowDirty(row) {
+  return !!(row.line_item_code || row.absolute_quantity);
+}
+
+async function handleBulkSave() {
+  clearAllFieldErrors(document.querySelector('.task-form-grid'));
+
+  const header = collectBulkHeaderData();
+  const headerCheck = validateBulkHeader(header);
+  if (!headerCheck.valid) {
+    Object.keys(headerCheck.errors).forEach(key => markFieldError(key, 'Required.'));
+    showToast('Fill in all required site header fields.', 'error');
+    return;
+  }
+
+  const allTasks = await getAllTasks();
+  const jobCodeCheck = validateJobCode(header.job_code, header.physical_site_id, allTasks, null);
+  if (!jobCodeCheck.valid) {
+    markFieldError('job_code', jobCodeCheck.error);
+    showToast(jobCodeCheck.error, 'error');
+    return;
+  }
+
+  const dirtyRows = bulkState.rows
+    .map((row, idx) => ({ row, idx }))
+    .filter(({ row }) => isBulkRowDirty(row));
+
+  if (dirtyRows.length === 0) {
+    showToast('Add at least one line item.', 'error');
+    return;
+  }
+
+  let hasRowErrors = false;
+  dirtyRows.forEach(({ row, idx }) => {
+    BULK_ROW_REQUIRED.forEach(field => {
+      const value = row[field];
+      const isEmpty = value === null || value === undefined || value === '';
+      if (isEmpty) {
+        markBulkRowFieldError(idx, field);
+        hasRowErrors = true;
+      }
+    });
+  });
+
+  if (hasRowErrors) {
+    showToast('Fill in all required fields on every row.', 'error');
+    return;
+  }
+
+  const currentUser = getCurrentUser();
+  const now = new Date();
+  const tasksToCreate = [];
+
+  for (const { row } of dirtyRows) {
+    const id = await generateTaskId(currentUser.prefix);
+    tasksToCreate.push({
+      ...header,
+      id,
+      line_item_code: row.line_item_code,
+      absolute_quantity: row.absolute_quantity,
+      actual_quantity: row.actual_quantity,
+      actual_quantity_overridden: row.actual_quantity_overridden,
+      new_price: row.new_price,
+      new_price_overridden: false,
+      new_total_price: row.new_total_price,
+      new_total_price_overridden: false,
+      catalog_year: row.catalog_year,
+      portion_rule_id: row.portion_rule_id,
+      lmp_portion: row.lmp_portion,
+      lmp_portion_overridden: false,
+      contractor_portion: row.contractor_portion,
+      contractor_portion_overridden: false,
+      status: row.status,
+      done_date: row.done_date,
+      comments: row.comments || null,
+      main_task: null,
+      task_name: null,
+      task_date: null,
+      prq: null,
+      pc: null,
+      is_deleted: false,
+      is_locked: false,
+      created_at: now,
+      updated_at: now,
+      created_by: currentUser.id,
+      coordinator_id: currentUser.id,
+      coordinator_name: currentUser.name
+    });
+  }
+
+  await db.transaction('rw', db.tasks, db.audit_log, async () => {
+    await db.tasks.bulkAdd(tasksToCreate);
+    for (const task of tasksToCreate) {
+      await writeAuditLog({ task_id: task.id, user_id: currentUser.id, action: 'task_created' });
+    }
+  });
+
+  showToast(`${tasksToCreate.length} task${tasksToCreate.length === 1 ? '' : 's'} created for site ${header.physical_site_id}.`, 'success');
+
+  await renderCoordinatorTaskList();
+}
+
+function attachBulkEntryEvents() {
+  document.getElementById('field-job_code').addEventListener('blur', validateBulkJobCodeOnBlur);
+
+  document.getElementById('field-distance').addEventListener('change', () => recalcAllBulkRowsFinancials());
+  document.getElementById('field-contractor').addEventListener('change', () => recalcAllBulkRowsFinancials());
+
+  document.getElementById('bulk-template-apply-btn').addEventListener('click', handleApplyTemplate);
+  document.getElementById('bulk-fill-status').addEventListener('change', handleFillSameStatus);
+  document.getElementById('bulk-fill-date').addEventListener('change', handleFillSameDate);
+  document.getElementById('bulk-add-row-btn').addEventListener('click', () => {
+    bulkState.rows.push(createBulkRow());
+    renderBulkRowsTable();
+  });
+
+  document.getElementById('bulk-cancel-btn').addEventListener('click', () => renderCoordinatorTaskList());
+  document.getElementById('bulk-save-btn').addEventListener('click', handleBulkSave);
+
+  const tbody = document.getElementById('bulk-rows-tbody');
+  tbody.addEventListener('input', handleBulkRowInput);
+  tbody.addEventListener('change', handleBulkRowChange);
+  tbody.addEventListener('click', handleBulkRowClick);
+}
+
+window.renderBulkEntryForm = renderBulkEntryForm;
 
 window.addTask = addTask;
 window.updateTask = updateTask;

@@ -22,7 +22,8 @@ const ICONS = {
   unlock: 'M5 11h14v10H5V11Zm2 0V7a5 5 0 0 1 9.5-2',
   calc: 'M5 3h14v18H5V3Zm3 4h8M8 11h2m3 0h2M8 15h2m3 0h2M8 19h2',
   warn: 'M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
-  check: 'M20 6 9 17l-5-5'
+  check: 'M20 6 9 17l-5-5',
+  close: 'M18 6 6 18M6 6l12 12'
 };
 
 const ROUTES = {
