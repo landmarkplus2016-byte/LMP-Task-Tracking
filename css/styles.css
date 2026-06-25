@@ -1,0 +1,383 @@
+/* ==========================================================================
+   Project Tracker — Base Styles & Design Tokens
+   Source of truth: DESIGN_SPEC.md
+   ========================================================================== */
+
+:root {
+  /* Fonts */
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Backgrounds & surfaces */
+  --bg:        #f5f6f8;
+  --surface:   #ffffff;
+  --surface-2: #fafbfc;
+  --sidebar:   #0e1726;
+  --sidebar-2: #16213a;
+
+  /* Text */
+  --ink:   #0f172a;
+  --ink-2: #475569;
+  --ink-3: #94a3b8;
+
+  /* Borders */
+  --line:   #e6e8ec;
+  --line-2: #eef0f3;
+
+  /* Accent (blue — primary interactive color) */
+  --accent:     #2563eb;
+  --accent-ink: #1d4ed8;
+  --accent-bg:  #eff5ff;
+
+  /* Semantic colors */
+  --green:    #16a34a;
+  --green-bg: #e8f6ed;
+
+  --blue:     #2563eb;
+  --blue-bg:  #e7effd;
+
+  --red:      #dc2626;
+  --red-bg:   #fdeaea;
+
+  --amber:    #b45309;
+  --amber-bg: #fdf3e3;
+
+  --slate:    #64748b;
+  --slate-bg: #eef1f5;
+
+  /* Shape */
+  --radius:    10px;
+  --radius-sm: 7px;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgba(15,23,42,.06), 0 1px 1px rgba(15,23,42,.04);
+  --shadow:    0 4px 14px rgba(15,23,42,.08), 0 1px 3px rgba(15,23,42,.06);
+  --shadow-lg: 0 18px 50px rgba(15,23,42,.18), 0 4px 12px rgba(15,23,42,.10);
+}
+
+/* ==========================================================================
+   Base reset
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#app {
+  flex: 1;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-content {
+  flex: 1;
+  overflow: auto;
+}
+
+/* ==========================================================================
+   Custom scrollbars (all browsers)
+   ========================================================================== */
+
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cdd3db;
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #b4bcc7;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ==========================================================================
+   Utility classes
+   ========================================================================== */
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum" 1;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+
+.fade-in {
+  animation: fadeIn .22s ease both;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.scale-in {
+  animation: scaleIn .16s cubic-bezier(.2,.8,.2,1) both;
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ==========================================================================
+   Responsive shell — one breakpoint at 900px
+   ========================================================================== */
+
+.sidebar     { display: none; }
+.bottom-nav  { display: flex; }
+
+@media (min-width: 900px) {
+  .sidebar    { display: flex; width: 230px; }
+  .bottom-nav { display: none; }
+}
+
+/* ==========================================================================
+   Core UI components — DESIGN_SPEC.md section 6
+   ========================================================================== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all .12s ease;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: #d2d7de;
+  background: var(--surface-2);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn.primary:hover {
+  background: var(--accent-ink);
+}
+
+.btn.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.btn.ghost:hover {
+  background: #eef1f5;
+}
+
+.btn.sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  transition: all .12s ease;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+  border-color: #d2d7de;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: #eef1f5;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+
+.hidden {
+  display: none;
+}
+
+/* ==========================================================================
+   Topbar — DESIGN_SPEC.md section 8.2
+   ========================================================================== */
+
+.topbar {
+  height: 52px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.topbar-breadcrumb {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.breadcrumb-root {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.breadcrumb-current {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-search-wrap {
+  position: relative;
+  width: 240px;
+  flex-shrink: 0;
+}
+
+.topbar-search-wrap svg {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  color: var(--ink-3);
+  pointer-events: none;
+}
+
+.topbar-search {
+  width: 100%;
+  height: 34px;
+  padding: 0 36px 0 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color .12s, box-shadow .12s;
+}
+
+.topbar-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.topbar-search-wrap .kbd {
+  position: absolute;
+  right: 8px;
+  top: 7px;
+}
+
+.topbar-notif-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.notif-dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: #ef4444;
+  border: 2px solid #fff;
+}
+
+.notif-dropdown {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  width: 310px;
+  z-index: 40;
+  box-shadow: var(--shadow-lg);
+  padding: 10px;
+}
+
+.notif-empty {
+  font-size: 13px;
+  color: var(--ink-3);
+  text-align: center;
+  padding: 20px 10px;
+}
