@@ -232,15 +232,19 @@ function renderTopbar() {
   document.getElementById('topbar-bell-btn').addEventListener('click', toggleNotifDropdown);
 }
 
-function renderAppShell() {
+async function renderAppShell() {
+  if (typeof window.loadDropdownListsFromSettings === 'function') await window.loadDropdownListsFromSettings();
+
   const app = document.getElementById('app');
   app.innerHTML = `
     <div id="global-banner-root"></div>
     <header id="page-topbar" class="topbar"></header>
+    <div id="presence-bar-root"></div>
     <main id="page-content" class="page-content"></main>`;
   renderTopbar();
   if (typeof window.checkPendingSyncFailure === 'function') window.checkPendingSyncFailure();
   if (typeof window.renderSyncStartupBanner === 'function') window.renderSyncStartupBanner();
+  if (typeof window.startPresenceHeartbeat === 'function') window.startPresenceHeartbeat();
 }
 
 function navigateTo(hash) {
@@ -274,10 +278,10 @@ function renderReports() {
   document.getElementById('page-content').innerHTML = '<h1>Reports</h1>';
 }
 
-window.onLoginSuccess = function (session) {
+window.onLoginSuccess = async function (session) {
   const loadingScreen = document.getElementById('loading-screen');
   if (loadingScreen) loadingScreen.remove();
-  renderAppShell();
+  await renderAppShell();
   renderNav();
   handleRouteChange();
 };
@@ -304,7 +308,7 @@ async function init() {
     return;
   }
 
-  renderAppShell();
+  await renderAppShell();
   renderNav();
   handleRouteChange();
 }

@@ -13,7 +13,14 @@ const SYNC_PENDING_FAILURE_KEY = 'sync_pending_failure';
 const SYNC_RETRY_INTERVAL_MS = 2 * 60 * 1000;
 const SYNC_BANNER_DISMISS_KEY = 'pt_sync_banner_dismissed';
 
+const PRESENCE_HEARTBEAT_INTERVAL_MS = 30 * 1000;
+const PRESENCE_GREEN_MS = 60 * 1000;
+const PRESENCE_AMBER_MS = 5 * 60 * 1000;
+const PRESENCE_STALE_MS = 10 * 60 * 1000;
+
 let syncRetryTimer = null;
+let presenceHeartbeatTimer = null;
+let presenceState = { users: [] };
 
 /* ==========================================================================
    Folder configuration
@@ -144,14 +151,42 @@ async function readLockFile(handle) {
   return await readJsonFromFolder(handle, LOCK_FILENAME);
 }
 
-async function writeLockFile(handle, currentUser) {
-  const lock = {
-    locked_by: currentUser.name,
-    locked_at: new Date().toISOString(),
-    device: navigator.userAgent,
-    last_heartbeat: new Date().toISOString()
+function buildPresenceEntry(currentUser, existingEntry) {
+  const now = new Date().toISOString();
+  return {
+    name: currentUser.name,
+    locked_at: (existingEntry && existingEntry.locked_at) || now,
+    last_heartbeat: now,
+    device: navigator.userAgent
   };
+}
+
+function upsertLockUsers(lock, currentUser) {
+  const users = Array.isArray(lock && lock.users) ? lock.users.slice() : [];
+  const idx = users.findIndex(u => u.name === currentUser.name);
+  const entry = buildPresenceEntry(currentUser, idx !== -1 ? users[idx] : null);
+  if (idx !== -1) users[idx] = entry; else users.push(entry);
+  return { users };
+}
+
+function pruneStalePresence(lock) {
+  const users = Array.isArray(lock && lock.users) ? lock.users : [];
+  const now = Date.now();
+  return { users: users.filter(u => now - new Date(u.last_heartbeat).getTime() <= PRESENCE_STALE_MS) };
+}
+
+function getOtherActiveLockUsers(lock, currentUser) {
+  const users = Array.isArray(lock && lock.users) ? lock.users : [];
+  const now = Date.now();
+  return users.filter(u => u.name !== currentUser.name && (now - new Date(u.last_heartbeat).getTime()) <= PRESENCE_AMBER_MS);
+}
+
+async function writeLockFile(handle, currentUser) {
+  let existingLock = null;
+  try { existingLock = await readLockFile(handle); } catch (e) { existingLock = null; }
+  const lock = upsertLockUsers(pruneStalePresence(existingLock), currentUser);
   await writeJsonToFolder(handle, LOCK_FILENAME, lock);
+  presenceState.users = lock.users;
   return lock;
 }
 
@@ -267,12 +302,13 @@ async function loadFromSharedFolder() {
     return;
   }
 
-  if (lock && lock.locked_by && lock.locked_by !== currentUser.name) {
-    const proceed = await confirmDialog({
-      title: 'Shared file is in use',
-      message: `${lock.locked_by} has this open since ${syncFormatDateTime(lock.locked_at)}. Load anyway?`,
-      confirmLabel: 'Load anyway'
-    });
+  const otherActiveUsers = getOtherActiveLockUsers(lock, currentUser);
+  if (otherActiveUsers.length > 0) {
+    const names = otherActiveUsers.map(u => u.name).join(', ');
+    const message = otherActiveUsers.length === 1
+      ? `${names} has this open since ${syncFormatDateTime(otherActiveUsers[0].locked_at)}. Load anyway?`
+      : `${otherActiveUsers.length} other people have this open (${names}). Load anyway?`;
+    const proceed = await confirmDialog({ title: 'Shared file is in use', message, confirmLabel: 'Load anyway' });
     if (!proceed) return;
   }
 
@@ -517,6 +553,116 @@ function renderSyncStartupBanner() {
 }
 
 /* ==========================================================================
+   Heartbeat + presence indicator (CLAUDE.md Stage 6.2)
+   ========================================================================== */
+
+function presenceStatus(lastHeartbeatIso) {
+  const ageMs = Date.now() - new Date(lastHeartbeatIso).getTime();
+  if (ageMs < PRESENCE_GREEN_MS) return 'green';
+  if (ageMs < PRESENCE_AMBER_MS) return 'amber';
+  return 'grey';
+}
+
+function presenceAvatarHtml(entry, isSelf) {
+  const status = presenceStatus(entry.last_heartbeat);
+  const lastSeen = isSelf ? 'Active now' : `Last seen ${syncFormatDateTime(entry.last_heartbeat)}`;
+  return `
+    <span class="presence-avatar presence-${status}" title="${escapeHtml(entry.name)}${isSelf ? ' (you)' : ''} — ${escapeHtml(lastSeen)}">
+      ${escapeHtml(initials(entry.name))}
+    </span>`;
+}
+
+function renderPresenceBar() {
+  const root = document.getElementById('presence-bar-root');
+  if (!root) return;
+
+  const user = getCurrentUser();
+  if (!user || !MASTER_ROLES.includes(user.role) || !getSharedFolderLabel()) {
+    root.innerHTML = '';
+    return;
+  }
+
+  const now = Date.now();
+  let users = (presenceState.users || []).filter(u => now - new Date(u.last_heartbeat).getTime() <= PRESENCE_STALE_MS);
+
+  if (!users.some(u => u.name === user.name)) {
+    users = [...users, { name: user.name, last_heartbeat: new Date().toISOString(), locked_at: new Date().toISOString(), device: navigator.userAgent }];
+  }
+
+  users = users.slice().sort((a, b) => {
+    if (a.name === user.name) return -1;
+    if (b.name === user.name) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  if (users.length <= 1) {
+    root.innerHTML = `<div class="presence-bar"><span class="presence-bar-label">Only you are active</span></div>`;
+    return;
+  }
+
+  root.innerHTML = `
+    <div class="presence-bar">
+      <span class="presence-bar-label">Active now:</span>
+      <div class="presence-avatars">
+        ${users.map(u => presenceAvatarHtml(u, u.name === user.name)).join('')}
+      </div>
+    </div>`;
+}
+
+async function presenceHeartbeatTick() {
+  const user = getCurrentUser();
+  if (!user || !MASTER_ROLES.includes(user.role)) {
+    stopPresenceHeartbeat();
+    return;
+  }
+  if (!getSharedFolderLabel()) {
+    renderPresenceBar();
+    return;
+  }
+
+  const handle = await getStoredDirHandle();
+  if (!handle) {
+    renderPresenceBar();
+    return;
+  }
+
+  let granted = false;
+  try { granted = (await handle.queryPermission({ mode: 'readwrite' })) === 'granted'; } catch (e) { granted = false; }
+
+  try {
+    if (granted) {
+      await writeLockFile(handle, user);
+    } else {
+      const lock = await readLockFile(handle);
+      presenceState.users = pruneStalePresence(lock).users;
+    }
+  } catch (e) {
+    // shared folder temporarily unreachable — keep last known presence state
+  }
+
+  renderPresenceBar();
+}
+
+function startPresenceHeartbeat() {
+  const user = getCurrentUser();
+  if (!user || !MASTER_ROLES.includes(user.role)) return;
+  if (presenceHeartbeatTimer) return;
+
+  presenceHeartbeatTick();
+  presenceHeartbeatTimer = setInterval(presenceHeartbeatTick, PRESENCE_HEARTBEAT_INTERVAL_MS);
+}
+
+function stopPresenceHeartbeat() {
+  if (presenceHeartbeatTimer) {
+    clearInterval(presenceHeartbeatTimer);
+    presenceHeartbeatTimer = null;
+  }
+  presenceState.users = [];
+  const root = document.getElementById('presence-bar-root');
+  if (root) root.innerHTML = '';
+}
+
+/* ==========================================================================
    Settings → Sync & Shared Folder
    ========================================================================== */
 
@@ -593,6 +739,7 @@ function attachSyncSettingsEvents() {
     if (handle) {
       showToast(`Shared folder set to "${handle.name}".`, 'success');
       renderSyncSettings();
+      presenceHeartbeatTick();
     }
   });
   document.getElementById('sync-test-btn').addEventListener('click', testSharedFolderPath);
@@ -608,3 +755,6 @@ window.saveToSharedFolder = saveToSharedFolder;
 window.renderSyncSettings = renderSyncSettings;
 window.renderSyncStartupBanner = renderSyncStartupBanner;
 window.checkPendingSyncFailure = checkPendingSyncFailure;
+window.startPresenceHeartbeat = startPresenceHeartbeat;
+window.stopPresenceHeartbeat = stopPresenceHeartbeat;
+window.renderPresenceBar = renderPresenceBar;

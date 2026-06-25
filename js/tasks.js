@@ -20,6 +20,19 @@ async function writeAuditLog(entry) {
   });
 }
 
+let usersByIdCache = {};
+
+async function loadUsersByIdCache() {
+  const users = await db.users.toArray();
+  usersByIdCache = Object.fromEntries(users.map(u => [u.id, u.name]));
+}
+
+function lockTooltipText(task) {
+  if (!task.is_locked) return '';
+  const name = usersByIdCache[task.locked_by] || 'Unknown';
+  return `Locked by ${name}${task.locked_at ? ' on ' + formatDate(task.locked_at) : ''}`;
+}
+
 async function addTask(taskData) {
   const currentUser = getCurrentUser();
 
@@ -88,7 +101,8 @@ async function updateTask(id, changes) {
   }
 
   if (isFirstAcceptanceStatus) {
-    await lockTask(id, `Auto-locked: acceptance status set to ${changes.acceptance_status}`);
+    await lockTask(id, `Auto-locked: Acceptance Status set to ${changes.acceptance_status}`);
+    showToast('Task locked automatically', 'success');
   }
 
   return await db.tasks.get(id);
@@ -182,6 +196,52 @@ const ACCEPTANCE_STATUSES = ['REJ', 'PAC', 'PAC for Ever', 'TOC', 'FAC'];
 const PO_STATUSES = ['Sent', 'Partially Received', 'Received'];
 const TASKS_PAGE_SIZE = 50;
 
+/* ==========================================================================
+   Dropdown Lists — backed by app_settings, editable in Settings (Stage 8.2)
+   All arrays below are mutated in place (splice/push) so every existing
+   reference (selects, filters, PM_COLUMNS.options, etc.) stays in sync —
+   never reassign these bindings.
+   ========================================================================== */
+
+const SIMPLE_DROPDOWN_LISTS = [
+  { key: 'status', label: 'Status', array: STATUS_OPTIONS, settingsKey: 'dropdown_status', systemValues: ['Assigned', 'Done', 'Cancelled'], taskField: 'status' },
+  { key: 'acceptance_status', label: 'Acceptance Status', array: ACCEPTANCE_STATUSES, settingsKey: 'dropdown_acceptance_status', systemValues: [], taskField: 'acceptance_status', note: 'All values trigger auto-lock' },
+  { key: 'po_status', label: 'PO Status', array: PO_STATUSES, settingsKey: 'dropdown_po_status', systemValues: [], taskField: 'po_status' },
+  { key: 'region', label: 'Region', array: REGIONS, settingsKey: 'dropdown_region', systemValues: [], taskField: 'region' },
+  { key: 'contractor', label: 'Contractor', array: CONTRACTORS, settingsKey: 'dropdown_contractor', systemValues: [], taskField: 'contractor' },
+  { key: 'tx_rf', label: 'TX/RF', array: TXRF_OPTIONS, settingsKey: 'dropdown_tx_rf', systemValues: [], taskField: 'tx_rf' },
+  { key: 'task_name', label: 'Task Name', array: TASK_NAMES, settingsKey: 'dropdown_task_name', systemValues: [], taskField: 'task_name' }
+];
+
+const DISTANCE_LIST_SETTINGS_KEY = 'dropdown_distance';
+const DISTANCE_LIST = [
+  { band: '0Km-100Km', multiplier: 1.00 },
+  { band: '100Km-400Km', multiplier: 1.10 },
+  { band: '400Km-800Km', multiplier: 1.20 },
+  { band: '>800Km', multiplier: 1.25 }
+];
+
+function syncDistanceBandsFromList() {
+  DISTANCE_BANDS.splice(0, DISTANCE_BANDS.length, ...DISTANCE_LIST.map(d => d.band));
+}
+
+async function loadDropdownListsFromSettings() {
+  for (const list of SIMPLE_DROPDOWN_LISTS) {
+    const setting = await db.app_settings.get(list.settingsKey);
+    if (setting && Array.isArray(setting.value) && setting.value.length > 0) {
+      list.array.splice(0, list.array.length, ...setting.value);
+    }
+  }
+
+  const distanceSetting = await db.app_settings.get(DISTANCE_LIST_SETTINGS_KEY);
+  if (distanceSetting && Array.isArray(distanceSetting.value) && distanceSetting.value.length > 0) {
+    DISTANCE_LIST.splice(0, DISTANCE_LIST.length, ...distanceSetting.value.map(d => ({ band: d.band, multiplier: d.multiplier })));
+  }
+  syncDistanceBandsFromList();
+
+  await loadColumnOrderFromSettings();
+}
+
 let taskListCache = [];
 let taskListState = { search: '', status: '', region: '', vendor: '', tx_rf: '', sortField: 'done_date', sortDir: 'desc', page: 1 };
 
@@ -199,6 +259,7 @@ function renderTasks() {
 async function renderCoordinatorTaskList() {
   const user = getCurrentUser();
   taskListCache = await getMyTasks(user.id);
+  await loadUsersByIdCache();
   taskListState.page = 1;
 
   const container = document.getElementById('page-content');
@@ -308,7 +369,7 @@ function taskRowHtml(t) {
     ? `<span class="mono" style="color:var(--ink-2)">${formatDate(t.done_date)}</span>`
     : `<span style="color:var(--ink-3)">—</span>`;
   const actionsHtml = t.is_locked
-    ? `<span class="lock-icon" title="${escapeHtml(t.lock_reason || 'Locked')}">${iconSvg('lock', 13)}</span>`
+    ? `<span class="lock-icon" title="${escapeHtml(lockTooltipText(t))}">${iconSvg('lock', 13)}</span>`
     : `<button class="icon-btn sm-icon-btn" data-action="edit" data-id="${t.id}" title="Edit">${iconSvg('edit', 14)}</button>
        <button class="icon-btn sm-icon-btn" data-action="delete" data-id="${t.id}" title="Delete">${iconSvg('trash', 14)}</button>`;
 
@@ -523,7 +584,33 @@ const PM_COLUMNS = [
 const ALL_MASTER_COLUMNS = [...COORDINATOR_COLUMNS, ...PM_COLUMNS];
 const PM_FIELD_META_MAP = Object.fromEntries(PM_COLUMNS.map(c => [c.key, c]));
 const MASTER_COLUMNS_SETTINGS_KEY = 'master_table_columns';
+const MASTER_COLUMN_ORDER_KEY = 'master_table_column_order';
 const MASTER_BADGE_PALETTE = ['#2563eb', '#7c3aed', '#0d9488', '#dc2626', '#d97706', '#0e7490', '#65a30d', '#be185d'];
+
+function syncAllMasterColumns() {
+  ALL_MASTER_COLUMNS.splice(0, ALL_MASTER_COLUMNS.length, ...COORDINATOR_COLUMNS, ...PM_COLUMNS);
+}
+
+async function loadColumnOrderFromSettings() {
+  const setting = await db.app_settings.get(MASTER_COLUMN_ORDER_KEY);
+  if (!setting || !Array.isArray(setting.value)) return;
+
+  const savedOrder = setting.value;
+  const reorderInPlace = (arr) => {
+    const byKey = Object.fromEntries(arr.map(c => [c.key, c]));
+    const reordered = savedOrder.map(k => byKey[k]).filter(Boolean);
+    arr.forEach(c => { if (!savedOrder.includes(c.key)) reordered.push(c); });
+    arr.splice(0, arr.length, ...reordered);
+  };
+
+  reorderInPlace(COORDINATOR_COLUMNS);
+  reorderInPlace(PM_COLUMNS);
+  syncAllMasterColumns();
+}
+
+async function saveColumnOrder() {
+  await db.app_settings.put({ key: MASTER_COLUMN_ORDER_KEY, value: ALL_MASTER_COLUMNS.map(c => c.key), updated_at: new Date() });
+}
 
 let masterTaskCache = [];
 let coordinatorBadgeMap = {};
@@ -572,6 +659,7 @@ async function saveMasterColumnVisibility(visibility) {
 
 async function renderMasterTaskList() {
   masterTaskCache = await getAllTasks();
+  await loadUsersByIdCache();
   masterTableState.visibleCount = TASKS_PAGE_SIZE;
   masterTableState.selectedIds = new Set();
   masterTableState.visibleColumns = await loadMasterColumnVisibility();
@@ -840,18 +928,21 @@ function masterRowHtml(task, visibleCols) {
     return `<td class="${cellClass}"${editableAttr}>${masterCellDisplayValue(task, col)}</td>`;
   }).join('');
 
-  const lockIconHtml = task.is_locked
-    ? `<span class="lock-icon" title="${escapeHtml(task.lock_reason || 'Locked')}">${iconSvg('lock', 13)}</span>`
-    : '';
-
   return `
     <tr class="data-row${lockedClass}${selectedClass}" data-id="${escapeHtml(task.id)}">
       <td class="master-checkbox-cell">
         <span class="row-checkbox${selected ? ' checked' : ''}" data-action="select-row" data-id="${escapeHtml(task.id)}">${selected ? iconSvg('check', 11) : ''}</span>
-        ${lockIconHtml}
+        ${masterLockButtonHtml(task)}
       </td>
       ${cells}
     </tr>`;
+}
+
+function masterLockButtonHtml(task) {
+  if (task.is_locked) {
+    return `<span class="lock-icon lock-action" data-action="unlock-task" data-id="${escapeHtml(task.id)}" title="${escapeHtml(lockTooltipText(task))}">${iconSvg('lock', 13)}</span>`;
+  }
+  return `<span class="lock-icon lock-action" data-action="lock-task" data-id="${escapeHtml(task.id)}" title="Lock task">${iconSvg('unlock', 13)}</span>`;
 }
 
 function renderMasterTableSection() {
@@ -959,6 +1050,95 @@ function attachMasterRowEvents() {
   document.querySelectorAll('[data-pm-cell]').forEach(cell => {
     cell.addEventListener('click', () => startInlinePmEdit(cell));
   });
+
+  document.querySelectorAll('[data-action="lock-task"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleLockTaskClick(btn.dataset.id);
+    });
+  });
+
+  document.querySelectorAll('[data-action="unlock-task"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleUnlockTaskClick(btn.dataset.id);
+    });
+  });
+}
+
+async function handleLockTaskClick(id) {
+  if (!window.confirm('Lock this task? Coordinators will no longer be able to edit it.')) return;
+
+  await lockTask(id, 'Manual lock by PM/AM/CCM');
+  showToast('Task locked.', 'success');
+  masterTaskCache = await getAllTasks();
+  renderMasterTableSection();
+}
+
+function handleUnlockTaskClick(id) {
+  openUnlockReasonModal(id);
+}
+
+function openUnlockReasonModal(id) {
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+
+  const escHandler = (e) => { if (e.key === 'Escape') close(); };
+  const close = () => {
+    root.remove();
+    document.removeEventListener('keydown', escHandler);
+  };
+
+  root.innerHTML = `
+    <div class="modal-backdrop scale-in" id="unlock-modal-backdrop">
+      <div class="card modal" id="unlock-modal-card">
+        <div class="modal-header">
+          <h2>Unlock Task</h2>
+          <button class="icon-btn" id="unlock-modal-close">${iconSvg('close', 16)}</button>
+        </div>
+        <div class="modal-body">
+          <label class="field" for="unlock-reason-input">
+            <span class="lbl">Reason for unlocking<span class="req">*</span></span>
+            <textarea id="unlock-reason-input" class="input textarea" rows="2"></textarea>
+            <span class="field-error" id="unlock-reason-error"></span>
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="btn ghost" id="unlock-modal-cancel">Cancel</button>
+          <button class="btn primary" id="unlock-modal-confirm">Unlock</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('unlock-modal-backdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'unlock-modal-backdrop') close();
+  });
+  document.getElementById('unlock-modal-close').addEventListener('click', close);
+  document.getElementById('unlock-modal-cancel').addEventListener('click', close);
+  document.getElementById('unlock-modal-confirm').addEventListener('click', async () => {
+    const input = document.getElementById('unlock-reason-input');
+    const errorEl = document.getElementById('unlock-reason-error');
+    const reason = input.value.trim();
+
+    if (!reason) {
+      input.classList.add('input-error');
+      errorEl.textContent = 'A reason is required.';
+      return;
+    }
+
+    const result = await unlockTask(id, reason);
+    close();
+
+    if (result && result.error) {
+      showToast(result.error, 'error');
+      return;
+    }
+
+    showToast('Task unlocked', 'success');
+    masterTaskCache = await getAllTasks();
+    renderMasterTableSection();
+  });
+  document.addEventListener('keydown', escHandler);
 }
 
 function startInlinePmEdit(cell) {
@@ -1180,6 +1360,8 @@ async function handleBulkLock() {
     renderMasterTableSection();
     return;
   }
+
+  if (!window.confirm(`Lock ${toLock.length} task${toLock.length === 1 ? '' : 's'}?`)) return;
 
   for (const id of toLock) {
     await lockTask(id, 'Bulk locked from master table');
@@ -2027,6 +2209,11 @@ async function handleApplyTemplate() {
     return;
   }
 
+  const template = await db.task_templates.get(templateId);
+  if (template) {
+    await db.task_templates.update(templateId, { times_applied: (template.times_applied || 0) + 1 });
+  }
+
   bulkState.rows = items.map(item => createBulkRow({
     line_item_code: item.line_item_code,
     absolute_quantity: item.default_qty ?? null
@@ -2221,3 +2408,11 @@ window.getDeletedTasks = getDeletedTasks;
 window.renderTasks = renderTasks;
 window.renderMasterTaskList = renderMasterTaskList;
 window.renderTaskForm = renderTaskForm;
+
+window.loadDropdownListsFromSettings = loadDropdownListsFromSettings;
+window.syncDistanceBandsFromList = syncDistanceBandsFromList;
+window.syncAllMasterColumns = syncAllMasterColumns;
+window.loadColumnOrderFromSettings = loadColumnOrderFromSettings;
+window.saveColumnOrder = saveColumnOrder;
+window.loadMasterColumnVisibility = loadMasterColumnVisibility;
+window.saveMasterColumnVisibility = saveMasterColumnVisibility;

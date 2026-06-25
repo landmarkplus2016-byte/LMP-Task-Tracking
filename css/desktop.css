@@ -345,6 +345,255 @@
   color: var(--slate);
 }
 
+.lock-icon.lock-action {
+  cursor: pointer;
+  transition: color .12s ease;
+}
+
+.lock-icon.lock-action:hover {
+  color: var(--ink);
+}
+
+/* ==========================================================================
+   Audit Log — DESIGN_SPEC.md section 9.6
+   ========================================================================== */
+
+.data-table tr.data-row.audit-row-amber {
+  background: var(--amber-bg);
+}
+
+.data-table tr.data-row.audit-row-amber:hover {
+  background: var(--amber-bg);
+}
+
+.audit-session-row {
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   User Accounts — Settings (CLAUDE.md Stage 8.1)
+   ========================================================================== */
+
+.user-accounts-section {
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.user-accounts-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.user-accounts-section-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.user-accounts-table .actions-cell {
+  gap: 6px;
+}
+
+.data-table tr.data-row.inactive-row {
+  background: var(--surface-2);
+  color: var(--ink-3);
+}
+
+.data-table tr.data-row.inactive-row:hover {
+  background: var(--surface-2);
+}
+
+.inactive-label {
+  color: var(--ink-3);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+/* ==========================================================================
+   Dropdown Lists Manager (CLAUDE.md Stage 8.2)
+   ========================================================================== */
+
+.dropdown-lists-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.dropdown-list-card {
+  padding: 16px 18px;
+}
+
+.dropdown-list-card-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.dropdown-list-note {
+  font-size: 11.5px;
+  color: var(--amber);
+  margin-bottom: 10px;
+}
+
+.dropdown-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 12px;
+  min-height: 30px;
+}
+
+.dropdown-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px 4px 6px;
+  border-radius: 999px;
+  background: var(--slate-bg);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: grab;
+}
+
+.dropdown-chip.dragging {
+  opacity: 0.4;
+}
+
+.dropdown-chip-handle {
+  display: inline-flex;
+  color: var(--ink-3);
+  transform: rotate(90deg);
+}
+
+.dropdown-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.dropdown-chip-remove:hover {
+  background: rgba(15, 23, 42, .1);
+  color: var(--ink);
+}
+
+.dropdown-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.distance-band-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.distance-band-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: grab;
+}
+
+.distance-band-row.dragging {
+  opacity: 0.4;
+}
+
+.distance-band-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.distance-multiplier-input {
+  max-width: 90px;
+}
+
+/* ==========================================================================
+   Column Manager (CLAUDE.md Stage 8.2)
+   ========================================================================== */
+
+.column-manager-section {
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.column-manager-section-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 10px;
+}
+
+.column-manager-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.column-manager-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line-2);
+  cursor: grab;
+}
+
+.column-manager-row:last-child {
+  border-bottom: none;
+}
+
+.column-manager-row.dragging {
+  opacity: 0.4;
+}
+
+.column-manager-row.locked {
+  cursor: default;
+}
+
+.column-manager-handle {
+  display: inline-flex;
+  color: var(--ink-3);
+  transform: rotate(90deg);
+}
+
+.column-manager-handle.disabled {
+  opacity: 0.35;
+}
+
+.column-manager-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.column-manager-lock {
+  display: inline-flex;
+  color: var(--ink-3);
+}
+
+.column-manager-checkbox {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .tasks-pagination {
   display: flex;
   align-items: center;
@@ -1348,4 +1597,207 @@
 
 .sync-error-banner button {
   flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Presence bar — master roles only (CLAUDE.md Stage 6.2)
+   ========================================================================== */
+
+.presence-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 20px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.presence-bar-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.presence-avatars {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.presence-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #2e4266;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0;
+  box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3.5px var(--ring-color, var(--slate));
+  cursor: default;
+}
+
+.presence-avatar.presence-green {
+  --ring-color: var(--green);
+}
+
+.presence-avatar.presence-amber {
+  --ring-color: var(--amber);
+}
+
+.presence-avatar.presence-grey {
+  --ring-color: var(--slate);
+}
+
+/* ==========================================================================
+   Task Templates (CLAUDE.md Stage 8.3)
+   ========================================================================== */
+
+.template-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.template-card {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.template-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.template-card-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.template-card-desc {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+
+.template-card-meta {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.template-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.template-items-section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-2);
+}
+
+.template-item-search-row {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.template-item-search-results {
+  position: absolute;
+  top: 38px;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px;
+}
+
+.template-item-search-result {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.template-item-search-result:hover {
+  background: var(--surface-2);
+}
+
+.template-item-search-empty {
+  padding: 10px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.template-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.template-item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: grab;
+}
+
+.template-item-row.dragging {
+  opacity: 0.4;
+}
+
+.template-item-name {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.template-item-desc {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-item-qty-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+
+.template-item-qty-input {
+  width: 70px;
+  height: 28px;
 }

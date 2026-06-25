@@ -20,6 +20,7 @@ function requireRole(roles) {
 }
 
 function logout() {
+  if (typeof window.stopPresenceHeartbeat === 'function') window.stopPresenceHeartbeat();
   localStorage.removeItem('pt_user');
   renderLoginScreen();
 }
@@ -207,6 +208,8 @@ async function handleLoginSubmit(e) {
     return;
   }
 
+  await writeAuditLog({ user_id: user.id, action: 'login' });
+
   if (user.must_change_password) {
     renderChangePasswordScreen(user);
     return;
@@ -239,6 +242,7 @@ async function handleChangePasswordSubmit(e, user) {
 
   const password_hash = await hashPassword(password);
   await db.users.update(user.id, { password_hash, must_change_password: false });
+  await writeAuditLog({ user_id: user.id, action: 'password_changed' });
 
   const session = { id: user.id, name: user.name, role: user.role, prefix: user.prefix };
   localStorage.setItem('pt_user', JSON.stringify(session));
