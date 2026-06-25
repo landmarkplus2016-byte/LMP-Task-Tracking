@@ -684,6 +684,7 @@ function masterListShellHtml() {
           <p class="tasks-subtitle">${masterTaskCache.length} task${masterTaskCache.length === 1 ? '' : 's'} · ${formatMoney(totalValue) || 0} EGP total</p>
         </div>
         <div class="tasks-page-header-actions">
+          <button id="master-export-btn" class="btn ghost sm">${iconSvg('download', 14)}<span>Export to Excel</span></button>
           <div class="master-columns-wrap">
             <button id="master-columns-btn" class="btn ghost sm">${iconSvg('rows', 14)}<span>Columns</span></button>
             <div id="master-columns-menu" class="master-columns-menu card scale-in hidden"></div>
@@ -743,6 +744,19 @@ function handleDocumentClickForColumnsMenu(e) {
 }
 
 function attachMasterListShellEvents() {
+  document.getElementById('master-export-btn').addEventListener('click', () => {
+    exportMasterExcel({
+      search: masterTableState.search,
+      status: masterTableState.status,
+      region: masterTableState.region,
+      vendor: masterTableState.vendor,
+      coordinator: masterTableState.coordinator,
+      acceptanceStatus: masterTableState.acceptanceStatus,
+      txrf: masterTableState.txrf,
+      quickFilter: masterTableState.quickFilter
+    });
+  });
+
   document.getElementById('master-columns-btn').addEventListener('click', toggleMasterColumnsMenu);
   document.removeEventListener('click', handleDocumentClickForColumnsMenu);
   document.addEventListener('click', handleDocumentClickForColumnsMenu);

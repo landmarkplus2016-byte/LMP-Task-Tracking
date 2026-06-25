@@ -4,6 +4,7 @@
 
 const SETTINGS_SECTIONS = [
   { key: 'my-defaults', label: 'My Defaults', roles: ['coordinator'] },
+  { key: 'backup-data', label: 'Backup & Data', roles: null },
   { key: 'price-catalog', label: 'Price Catalog', roles: null },
   { key: 'general-stream', label: 'General Stream', roles: ['project_manager'] },
   { key: 'contractor-portions', label: 'Contractor Portions', roles: ['project_manager'] },
@@ -13,6 +14,7 @@ const SETTINGS_SECTIONS = [
   { key: 'sync', label: 'Sync & Shared Folder', roles: MASTER_ROLES },
   { key: 'import-history', label: 'Import History', roles: ['project_manager'] },
   { key: 'user-accounts', label: 'User Accounts', roles: ['project_manager'] },
+  { key: 'deleted-tasks', label: 'Deleted Tasks', roles: null },
   { key: 'audit-log', label: 'Audit Log', roles: ['project_manager'] }
 ];
 
@@ -75,6 +77,8 @@ function renderActiveSettingsSection() {
   const key = settingsState.activeSection;
   if (key === 'my-defaults') {
     renderMyDefaultsSettings();
+  } else if (key === 'backup-data') {
+    renderBackupSettings();
   } else if (key === 'price-catalog') {
     renderCatalogSettings('settings-content');
   } else if (key === 'general-stream') {
@@ -93,6 +97,8 @@ function renderActiveSettingsSection() {
     renderImportHistorySettings();
   } else if (key === 'user-accounts') {
     renderUserAccountsSettings();
+  } else if (key === 'deleted-tasks') {
+    renderDeletedTasksSettings();
   } else if (key === 'audit-log') {
     renderAuditLogSettings();
   }
@@ -484,6 +490,7 @@ const AUDIT_ACTION_LABELS = {
   task_locked: 'Task Locked',
   task_unlocked: 'Task Unlocked',
   import_applied: 'Import Applied',
+  restore_applied: 'Backup Restored',
   export_created: 'Export Created',
   login: 'Login',
   password_changed: 'Password Changed'
@@ -2342,6 +2349,119 @@ function attachMyDefaultsEvents() {
   document.getElementById('clear-defaults-btn').addEventListener('click', handleClearMyDefaults);
 }
 
+/* ==========================================================================
+   Deleted Tasks — Settings (CLAUDE.md Stage 10.2)
+   ========================================================================== */
+
+const DELETED_TASKS_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
+
+let deletedTasksState = { rows: [] };
+
+function daysRemainingInfo(deletedAt) {
+  if (!deletedAt) return { expired: true, label: 'Expired' };
+  const remainingMs = (new Date(deletedAt).getTime() + DELETED_TASKS_WINDOW_MS) - Date.now();
+  if (remainingMs <= 0) return { expired: true, label: 'Expired' };
+  const days = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+  return { expired: false, label: `${days} day${days === 1 ? '' : 's'}` };
+}
+
+async function renderDeletedTasksSettings() {
+  const container = document.getElementById('settings-content');
+  if (!container) return;
+
+  const user = getCurrentUser();
+  await loadUsersByIdCache();
+
+  const deleted = await getDeletedTasks(user.id);
+  deleted.sort((a, b) => new Date(b.deleted_at) - new Date(a.deleted_at));
+  deletedTasksState.rows = deleted;
+
+  container.innerHTML = deletedTasksPageHtml();
+  attachDeletedTasksEvents();
+}
+
+function deletedTasksPageHtml() {
+  const rows = deletedTasksState.rows;
+  return `
+    <div class="fade-in">
+      <div class="tasks-page-header" style="margin-bottom:14px">
+        <div>
+          <h1>Deleted Tasks</h1>
+          <p class="tasks-subtitle">${rows.length} deleted task${rows.length === 1 ? '' : 's'} · recoverable within 10 days</p>
+        </div>
+      </div>
+      <div class="card">
+        ${deletedTasksTableHtml()}
+      </div>
+    </div>`;
+}
+
+function deletedTasksTableHtml() {
+  const rows = deletedTasksState.rows;
+  if (rows.length === 0) {
+    return `
+      <div class="empty-state">
+        ${iconSvg('trash', 30)}
+        <div class="empty-state-title">No deleted tasks.</div>
+        <div class="empty-state-desc">Deleted tasks appear here for 10 days before being permanently removed.</div>
+      </div>`;
+  }
+
+  return `
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:170px">Task ID</th>
+          <th style="width:120px">Physical Site ID</th>
+          <th style="width:160px">Task Name</th>
+          <th style="width:140px">Coordinator</th>
+          <th style="width:140px">Deleted By</th>
+          <th style="width:110px">Deleted At</th>
+          <th style="width:110px">Days Remaining</th>
+          <th style="width:100px">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(deletedTaskRowHtml).join('')}
+      </tbody>
+    </table>`;
+}
+
+function deletedTaskRowHtml(task) {
+  const info = daysRemainingInfo(task.deleted_at);
+  const deletedByName = usersByIdCache[task.deleted_by] || '—';
+
+  return `
+    <tr class="data-row">
+      <td class="mono">${escapeHtml(task.id)}</td>
+      <td class="mono">${escapeHtml(task.physical_site_id || '')}</td>
+      <td>${escapeHtml(task.task_name || '')}</td>
+      <td>${escapeHtml(task.coordinator_name || '')}</td>
+      <td>${escapeHtml(deletedByName)}</td>
+      <td class="mono" style="color:var(--ink-2)">${task.deleted_at ? formatDate(task.deleted_at) : '—'}</td>
+      <td style="${info.expired ? 'color:var(--red);font-weight:600' : ''}">${info.label}</td>
+      <td class="actions-cell">
+        <button class="btn ghost sm" data-action="recover" data-id="${escapeHtml(task.id)}" ${info.expired ? 'disabled' : ''}>Recover</button>
+      </td>
+    </tr>`;
+}
+
+function attachDeletedTasksEvents() {
+  document.querySelectorAll('[data-action="recover"]').forEach(btn => {
+    btn.addEventListener('click', () => handleRecoverTask(btn.dataset.id));
+  });
+}
+
+async function handleRecoverTask(id) {
+  const result = await recoverTask(id);
+  if (result && result.error) {
+    showToast(result.error, 'error');
+    return;
+  }
+  showToast('Task recovered.', 'success');
+  renderDeletedTasksSettings();
+}
+
 window.renderSettings = renderSettings;
 window.saveContractorPortion = saveContractorPortion;
 window.renderImportHistorySettings = renderImportHistorySettings;
@@ -2351,3 +2471,4 @@ window.renderDropdownListsSettings = renderDropdownListsSettings;
 window.renderColumnManagerSettings = renderColumnManagerSettings;
 window.renderTaskTemplatesSettings = renderTaskTemplatesSettings;
 window.renderMyDefaultsSettings = renderMyDefaultsSettings;
+window.renderDeletedTasksSettings = renderDeletedTasksSettings;

@@ -245,6 +245,7 @@ async function renderAppShell() {
   if (typeof window.checkPendingSyncFailure === 'function') window.checkPendingSyncFailure();
   if (typeof window.renderSyncStartupBanner === 'function') window.renderSyncStartupBanner();
   if (typeof window.startPresenceHeartbeat === 'function') window.startPresenceHeartbeat();
+  if (typeof window.startAutoBackup === 'function') window.startAutoBackup();
 }
 
 function navigateTo(hash) {
@@ -291,6 +292,8 @@ window.redirectToDashboard = function () {
 };
 
 async function init() {
+  if (typeof window.initPWA === 'function') window.initPWA();
+
   await purgeSoftDeleted();
   const { needsSetup } = await runSeed();
 
