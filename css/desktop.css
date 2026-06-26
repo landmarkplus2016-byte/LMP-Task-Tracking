@@ -316,6 +316,10 @@
   text-overflow: ellipsis;
 }
 
+.data-table tr.data-row {
+  cursor: pointer;
+}
+
 .data-table tr.data-row:hover {
   background: #f7f9fc;
 }
@@ -1065,6 +1069,51 @@
   flex: 1;
   overflow: auto;
   min-height: 0;
+}
+
+/* Sticky header row — DESIGN_SPEC.md section 12 */
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Sticky first column (checkbox + ID) on horizontal scroll — wide master table */
+.master-table td:nth-child(1),
+.master-table td:nth-child(2) {
+  position: sticky;
+  background: var(--surface);
+  z-index: 1;
+}
+
+.master-table td:nth-child(1) { left: 0; z-index: 2; }
+.master-table td:nth-child(2) { left: 56px; }
+
+.master-table tr.data-row:hover td:nth-child(1),
+.master-table tr.data-row:hover td:nth-child(2) { background: #f7f9fc; }
+
+.master-table tr.data-row.locked-row td:nth-child(1),
+.master-table tr.data-row.locked-row td:nth-child(2) { background: #fbfbfc; }
+
+.master-table tr.data-row.selected-row td:nth-child(1),
+.master-table tr.data-row.selected-row td:nth-child(2) { background: var(--accent-bg); }
+
+.master-table th:nth-child(1),
+.master-table th:nth-child(2) {
+  position: sticky;
+  z-index: 3;
+  background: #fafbfc;
+}
+
+.master-table th:nth-child(1) { left: 0; z-index: 4; }
+.master-table th:nth-child(2) { left: 56px; }
+
+/* Virtual scroll spacer rows — keep scrollbar height correct without
+   rendering off-screen rows (DESIGN_SPEC.md section 12) */
+.virtual-spacer-row td {
+  padding: 0;
+  border: none;
+  height: auto;
 }
 
 .master-table th,

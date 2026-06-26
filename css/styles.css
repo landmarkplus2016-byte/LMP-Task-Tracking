@@ -97,6 +97,27 @@ body {
 }
 
 /* ==========================================================================
+   Accessibility — visible focus outline on every focusable element
+   ========================================================================== */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.input:focus-visible,
+.select:focus-visible,
+.topbar-search:focus-visible {
+  outline: none;
+}
+
+.row-checkbox:focus-visible,
+.lock-icon:focus-visible {
+  outline-offset: 1px;
+}
+
+/* ==========================================================================
    Custom scrollbars (all browsers)
    ========================================================================== */
 
@@ -669,11 +690,120 @@ textarea.input {
   display: flex;
 }
 
+.toast-message {
+  flex: 1;
+}
+
+.toast-close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all .12s ease;
+}
+
+.toast-close:hover {
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
 .notif-empty {
   font-size: 13px;
   color: var(--ink-3);
   text-align: center;
   padding: 20px 10px;
+}
+
+/* ==========================================================================
+   Loading states — table skeleton, button spinner, full-page loader
+   ========================================================================== */
+
+.skeleton-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 46px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line-2);
+}
+
+.skeleton-bar {
+  flex-shrink: 0;
+  height: 12px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--line-2) 25%, var(--line) 37%, var(--line-2) 63%);
+  background-size: 400% 100%;
+  animation: skeletonShimmer 1.4s ease infinite;
+}
+
+@keyframes skeletonShimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid rgba(255, 255, 255, .4);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: btnSpin .6s linear infinite;
+}
+
+.btn:not(.primary) .btn-spinner {
+  border-color: var(--line);
+  border-top-color: var(--ink-2);
+}
+
+@keyframes btnSpin {
+  to { transform: rotate(360deg); }
+}
+
+#loading-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--bg);
+  z-index: 9999;
+  transition: opacity .18s ease;
+}
+
+#loading-screen.loading-screen-out {
+  opacity: 0;
+}
+
+#loading-screen .page-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: btnSpin .7s linear infinite;
+}
+
+#loading-screen .loading-text {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
 }
 
 /* ==========================================================================

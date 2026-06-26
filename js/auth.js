@@ -167,20 +167,28 @@ async function handleSetupSubmit(e) {
     return;
   }
 
-  const password_hash = await hashPassword(password);
-  const id = await db.users.add({
-    name,
-    email,
-    password_hash,
-    role: 'project_manager',
-    is_active: true,
-    must_change_password: false,
-    created_at: new Date()
-  });
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  setButtonLoading(submitBtn, true);
 
-  const session = { id, name, role: 'project_manager', prefix: null };
-  localStorage.setItem('pt_user', JSON.stringify(session));
-  completeAuth(session);
+  try {
+    const password_hash = await hashPassword(password);
+    const id = await db.users.add({
+      name,
+      email,
+      password_hash,
+      role: 'project_manager',
+      is_active: true,
+      must_change_password: false,
+      created_at: new Date()
+    });
+
+    const session = { id, name, role: 'project_manager', prefix: null };
+    localStorage.setItem('pt_user', JSON.stringify(session));
+    completeAuth(session);
+  } catch (err) {
+    setButtonLoading(submitBtn, false);
+    showError('setup-error', 'Could not create your account. Please try again.');
+  }
 }
 
 async function handleLoginSubmit(e) {
@@ -195,29 +203,39 @@ async function handleLoginSubmit(e) {
     return;
   }
 
-  const hash = await hashPassword(password);
-  const user = await db.users.where('email').equals(email).first();
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  setButtonLoading(submitBtn, true);
 
-  if (!user || user.password_hash !== hash) {
-    showError('login-error', 'Invalid email or password');
-    return;
+  try {
+    const hash = await hashPassword(password);
+    const user = await db.users.where('email').equals(email).first();
+
+    if (!user || user.password_hash !== hash) {
+      setButtonLoading(submitBtn, false);
+      showError('login-error', 'Invalid email or password');
+      return;
+    }
+
+    if (!user.is_active) {
+      setButtonLoading(submitBtn, false);
+      showError('login-error', 'Account is deactivated. Contact PM.');
+      return;
+    }
+
+    await writeAuditLog({ user_id: user.id, action: 'login' });
+
+    if (user.must_change_password) {
+      renderChangePasswordScreen(user);
+      return;
+    }
+
+    const session = { id: user.id, name: user.name, role: user.role, prefix: user.prefix };
+    localStorage.setItem('pt_user', JSON.stringify(session));
+    completeAuth(session);
+  } catch (err) {
+    setButtonLoading(submitBtn, false);
+    showError('login-error', 'Could not log in. Please try again.');
   }
-
-  if (!user.is_active) {
-    showError('login-error', 'Account is deactivated. Contact PM.');
-    return;
-  }
-
-  await writeAuditLog({ user_id: user.id, action: 'login' });
-
-  if (user.must_change_password) {
-    renderChangePasswordScreen(user);
-    return;
-  }
-
-  const session = { id: user.id, name: user.name, role: user.role, prefix: user.prefix };
-  localStorage.setItem('pt_user', JSON.stringify(session));
-  completeAuth(session);
 }
 
 async function handleChangePasswordSubmit(e, user) {
@@ -240,13 +258,21 @@ async function handleChangePasswordSubmit(e, user) {
     return;
   }
 
-  const password_hash = await hashPassword(password);
-  await db.users.update(user.id, { password_hash, must_change_password: false });
-  await writeAuditLog({ user_id: user.id, action: 'password_changed' });
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  setButtonLoading(submitBtn, true);
 
-  const session = { id: user.id, name: user.name, role: user.role, prefix: user.prefix };
-  localStorage.setItem('pt_user', JSON.stringify(session));
-  completeAuth(session);
+  try {
+    const password_hash = await hashPassword(password);
+    await db.users.update(user.id, { password_hash, must_change_password: false });
+    await writeAuditLog({ user_id: user.id, action: 'password_changed' });
+
+    const session = { id: user.id, name: user.name, role: user.role, prefix: user.prefix };
+    localStorage.setItem('pt_user', JSON.stringify(session));
+    completeAuth(session);
+  } catch (err) {
+    setButtonLoading(submitBtn, false);
+    showError('changepw-error', 'Could not update your password. Please try again.');
+  }
 }
 
 window.getCurrentUser = getCurrentUser;

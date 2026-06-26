@@ -41,6 +41,11 @@ function importFormatValue(field, value) {
   return String(value);
 }
 
+function importValueHtml(field, value) {
+  const formatted = importFormatValue(field, value);
+  return formatted === '—' ? '<span style="color:var(--ink-3)">—</span>' : escapeHtml(formatted);
+}
+
 function importFormatDateTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -173,26 +178,30 @@ async function handleFileSelected(file) {
     return;
   }
 
-  const allMasterTasks = await db.tasks.toArray();
+  try {
+    const allMasterTasks = await db.tasks.toArray();
 
-  const mismatchMessage = await checkCoordinatorMismatch(data, allMasterTasks);
-  if (mismatchMessage) {
-    const proceed = window.confirm(`${mismatchMessage}\n\nContinue importing anyway?`);
-    if (!proceed) return;
+    const mismatchMessage = await checkCoordinatorMismatch(data, allMasterTasks);
+    if (mismatchMessage) {
+      const proceed = window.confirm(`${mismatchMessage}\n\nContinue importing anyway?`);
+      if (!proceed) return;
+    }
+
+    const isDuplicate = await checkDuplicateImport(data);
+    const diff = diffImport(data.tasks, allMasterTasks);
+
+    importState = {
+      header: data,
+      filename: file.name,
+      diff,
+      isDuplicate,
+      checks: buildDefaultChecks(diff)
+    };
+
+    renderImport();
+  } catch (err) {
+    showToast('Could not process this file. Please check it and try again.', 'error');
   }
-
-  const isDuplicate = await checkDuplicateImport(data);
-  const diff = diffImport(data.tasks, allMasterTasks);
-
-  importState = {
-    header: data,
-    filename: file.name,
-    diff,
-    isDuplicate,
-    checks: buildDefaultChecks(diff)
-  };
-
-  renderImport();
 }
 
 /* ==========================================================================
@@ -302,9 +311,9 @@ function importChangeGroupHtml(group) {
             <input type="checkbox" class="import-row-checkbox" data-section="changes" data-task="${escapeHtml(group.taskId)}" data-field="${fc.field}"
               ${(!locked && importState.checks.changes[group.taskId][fc.field]) ? 'checked' : ''} ${locked ? 'disabled' : ''}>
             <span class="import-change-field">${escapeHtml(importFieldLabel(fc.field))}</span>
-            <span class="import-change-value">${escapeHtml(importFormatValue(fc.field, fc.oldValue))}</span>
+            <span class="import-change-value">${importValueHtml(fc.field, fc.oldValue)}</span>
             ${iconSvg('arrowRight', 13)}
-            <span class="import-change-value new">${escapeHtml(importFormatValue(fc.field, fc.newValue))}</span>
+            <span class="import-change-value new">${importValueHtml(fc.field, fc.newValue)}</span>
           </label>`).join('')}
       </div>
     </div>`;
@@ -448,6 +457,18 @@ function generateImportId() {
 }
 
 async function handleConfirmImport() {
+  const btn = document.getElementById('import-confirm-btn');
+  setButtonLoading(btn, true, 'Applying…');
+  try {
+    await applyConfirmedImport();
+  } catch (err) {
+    showToast('Import was interrupted partway through. Check Audit Log and the task list before retrying.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+async function applyConfirmedImport() {
   const currentUser = getCurrentUser();
   const diff = importState.diff;
   const filename = importState.filename;

@@ -173,6 +173,7 @@ async function deleteCatalog(id) {
 
 let catalogPageState = { catalogs: [], expandedId: null, expandedItems: [], containerId: 'page-content' };
 let uploadModalState = null;
+let catalogModalFormSnapshot = null;
 
 async function renderCatalogSettings(containerId) {
   const user = getCurrentUser();
@@ -182,7 +183,14 @@ async function renderCatalogSettings(containerId) {
   const container = document.getElementById(catalogPageState.containerId);
   if (!container) return;
 
-  catalogPageState.catalogs = await loadCatalogsWithMeta();
+  container.innerHTML = tableSkeletonHtml(4);
+
+  try {
+    catalogPageState.catalogs = await loadCatalogsWithMeta();
+  } catch (err) {
+    showToast('Could not load the price catalog.', 'error');
+    return;
+  }
   catalogPageState.expandedId = null;
   catalogPageState.expandedItems = [];
 
@@ -264,7 +272,7 @@ function catalogRowHtml(catalog, isActive, canManage) {
       <td>${escapeHtml(catalog.uploadedByName)}</td>
       <td class="mono">${formatDate(catalog.uploaded_at)}</td>
       <td>${statusCell}</td>
-      ${canManage ? `<td class="actions-cell"><button class="icon-btn sm-icon-btn" data-action="delete-catalog" data-id="${catalog.id}" title="Delete catalog">${iconSvg('trash', 14)}</button></td>` : ''}
+      ${canManage ? `<td class="actions-cell"><button class="icon-btn sm-icon-btn" data-action="delete-catalog" data-id="${catalog.id}" title="Delete catalog" aria-label="Delete catalog">${iconSvg('trash', 14)}</button></td>` : ''}
     </tr>`;
 
   const expandedRow = expanded
@@ -336,8 +344,13 @@ async function toggleCatalogExpand(id, canManage) {
     catalogPageState.expandedId = null;
     catalogPageState.expandedItems = [];
   } else {
-    catalogPageState.expandedId = id;
-    catalogPageState.expandedItems = await db.catalog_items.where('catalog_id').equals(id).toArray();
+    try {
+      catalogPageState.expandedItems = await db.catalog_items.where('catalog_id').equals(id).toArray();
+      catalogPageState.expandedId = id;
+    } catch (err) {
+      showToast('Could not load catalog items.', 'error');
+      return;
+    }
   }
 
   const section = document.getElementById('catalog-list-section');
@@ -351,19 +364,28 @@ async function handleDeleteCatalog(id) {
   const catalog = catalogPageState.catalogs.find(c => c.id === id);
   if (!catalog) return;
 
-  const affected = await getCatalogTaskCount(catalog.year);
-  if (affected > 0) {
-    window.alert(`Cannot delete — ${affected} task${affected === 1 ? '' : 's'} reference the ${catalog.year} catalog.`);
-    return;
-  }
+  const btn = document.querySelector(`[data-action="delete-catalog"][data-id="${id}"]`);
 
-  if (!window.confirm(`Delete the ${catalog.year} catalog (${catalog.itemCount} item${catalog.itemCount === 1 ? '' : 's'})? This cannot be undone.`)) {
-    return;
-  }
+  try {
+    const affected = await getCatalogTaskCount(catalog.year);
+    if (affected > 0) {
+      showToast(`Cannot delete — ${affected} task${affected === 1 ? '' : 's'} reference the ${catalog.year} catalog.`, 'warning');
+      return;
+    }
 
-  await deleteCatalog(id);
-  showToast('Catalog deleted.', 'success');
-  await renderCatalogSettings(catalogPageState.containerId);
+    if (!window.confirm(`Delete the ${catalog.year} catalog (${catalog.itemCount} item${catalog.itemCount === 1 ? '' : 's'})? This cannot be undone.`)) {
+      return;
+    }
+
+    setButtonLoading(btn, true);
+    await deleteCatalog(id);
+    showToast('Catalog deleted.', 'success');
+    await renderCatalogSettings(catalogPageState.containerId);
+  } catch (err) {
+    showToast('Could not delete catalog.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
 }
 
 /* ==========================================================================
@@ -393,9 +415,11 @@ function closeUploadCatalogModal() {
   uploadModalState = null;
 }
 
-function handleCatalogModalEscape(e) {
-  if (e.key === 'Escape') closeUploadCatalogModal();
-}
+const handleCatalogModalEscape = createModalEscapeHandler(
+  () => document.getElementById('catalog-modal-card'),
+  () => catalogModalFormSnapshot,
+  closeUploadCatalogModal
+);
 
 function uploadModalHtml() {
   const s = uploadModalState;
@@ -405,7 +429,7 @@ function uploadModalHtml() {
       <div class="card modal wide" id="catalog-modal-card">
         <div class="modal-header">
           <h2>Upload New Catalog</h2>
-          <button class="icon-btn" id="catalog-modal-close" title="Close">${iconSvg('close', 16)}</button>
+          <button class="icon-btn" id="catalog-modal-close" title="Close" aria-label="Close">${iconSvg('close', 16)}</button>
         </div>
         <div class="modal-body">
           <div class="form-section-grid" style="margin-bottom:16px">
@@ -441,6 +465,10 @@ function renderUploadModal() {
 }
 
 function attachUploadModalEvents() {
+  const modalCard = document.getElementById('catalog-modal-card');
+  catalogModalFormSnapshot = captureFormSnapshot(modalCard);
+  autofocusFirstField(modalCard);
+
   document.getElementById('catalog-modal-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'catalog-modal-backdrop') closeUploadCatalogModal();
   });
@@ -453,6 +481,7 @@ function attachUploadModalEvents() {
   });
   document.getElementById('catalog-file-input').addEventListener('change', handleCatalogFileSelect);
 
+  enableEnterToSubmit(modalCard, document.getElementById('catalog-modal-confirm'));
   document.addEventListener('keydown', handleCatalogModalEscape);
 }
 
@@ -592,10 +621,18 @@ async function handleConfirmUpload() {
     return;
   }
 
-  await saveCatalog({ year, validFrom, items: uploadModalState.items });
-  showToast(`Catalog for ${year} uploaded — ${uploadModalState.items.length} items.`, 'success');
-  closeUploadCatalogModal();
-  await renderCatalogSettings(catalogPageState.containerId);
+  const btn = document.getElementById('catalog-modal-confirm');
+  try {
+    setButtonLoading(btn, true);
+    await saveCatalog({ year, validFrom, items: uploadModalState.items });
+    showToast(`Catalog for ${year} uploaded — ${uploadModalState.items.length} items.`, 'success');
+    closeUploadCatalogModal();
+    await renderCatalogSettings(catalogPageState.containerId);
+  } catch (err) {
+    showToast('Could not save the price catalog. Please try again.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
 }
 
 /* ==========================================================================
@@ -698,6 +735,7 @@ async function saveStreamGeneration({ year, validFrom, items }) {
 
 let streamPageState = { generations: [], expandedKey: null, containerId: 'page-content' };
 let streamUploadModalState = null;
+let streamModalFormSnapshot = null;
 
 function streamGenerationKey(g) {
   return new Date(g.valid_from).toISOString();
@@ -711,7 +749,14 @@ async function renderGeneralStreamSettings(containerId) {
   const container = document.getElementById(streamPageState.containerId);
   if (!container) return;
 
-  streamPageState.generations = await getAllStreamGenerations();
+  container.innerHTML = tableSkeletonHtml(4);
+
+  try {
+    streamPageState.generations = await getAllStreamGenerations();
+  } catch (err) {
+    showToast('Could not load the general stream list.', 'error');
+    return;
+  }
   streamPageState.expandedKey = null;
 
   const canManage = user.role === 'project_manager';
@@ -873,9 +918,11 @@ function closeUploadStreamModal() {
   streamUploadModalState = null;
 }
 
-function handleStreamModalEscape(e) {
-  if (e.key === 'Escape') closeUploadStreamModal();
-}
+const handleStreamModalEscape = createModalEscapeHandler(
+  () => document.getElementById('stream-modal-card'),
+  () => streamModalFormSnapshot,
+  closeUploadStreamModal
+);
 
 function streamUploadModalHtml() {
   const s = streamUploadModalState;
@@ -885,7 +932,7 @@ function streamUploadModalHtml() {
       <div class="card modal wide" id="stream-modal-card">
         <div class="modal-header">
           <h2>Upload New Stream List</h2>
-          <button class="icon-btn" id="stream-modal-close" title="Close">${iconSvg('close', 16)}</button>
+          <button class="icon-btn" id="stream-modal-close" title="Close" aria-label="Close">${iconSvg('close', 16)}</button>
         </div>
         <div class="modal-body">
           <div class="form-section-grid" style="margin-bottom:16px">
@@ -921,6 +968,10 @@ function renderStreamUploadModal() {
 }
 
 function attachStreamUploadModalEvents() {
+  const modalCard = document.getElementById('stream-modal-card');
+  streamModalFormSnapshot = captureFormSnapshot(modalCard);
+  autofocusFirstField(modalCard);
+
   document.getElementById('stream-modal-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'stream-modal-backdrop') closeUploadStreamModal();
   });
@@ -933,6 +984,7 @@ function attachStreamUploadModalEvents() {
   });
   document.getElementById('stream-file-input').addEventListener('change', handleStreamFileSelect);
 
+  enableEnterToSubmit(modalCard, document.getElementById('stream-modal-confirm'));
   document.addEventListener('keydown', handleStreamModalEscape);
 }
 
@@ -1049,10 +1101,18 @@ async function handleConfirmStreamUpload() {
     return;
   }
 
-  await saveStreamGeneration({ year, validFrom, items: streamUploadModalState.items });
-  showToast(`Stream list for ${year} uploaded — ${streamUploadModalState.items.length} streams.`, 'success');
-  closeUploadStreamModal();
-  await renderGeneralStreamSettings(streamPageState.containerId);
+  const btn = document.getElementById('stream-modal-confirm');
+  try {
+    setButtonLoading(btn, true);
+    await saveStreamGeneration({ year, validFrom, items: streamUploadModalState.items });
+    showToast(`Stream list for ${year} uploaded — ${streamUploadModalState.items.length} streams.`, 'success');
+    closeUploadStreamModal();
+    await renderGeneralStreamSettings(streamPageState.containerId);
+  } catch (err) {
+    showToast('Could not save the general stream list. Please try again.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
 }
 
 window.getActiveCatalogForDate = getActiveCatalogForDate;

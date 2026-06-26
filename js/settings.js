@@ -110,6 +110,7 @@ function renderActiveSettingsSection() {
 
 let portionsPageState = { expanded: {} };
 let portionModalState = null;
+let portionModalFormSnapshot = null;
 
 function getCurrentPortionRule(sortedRulesDesc, dateValue) {
   const ruleDate = dateValue ? new Date(dateValue) : new Date();
@@ -122,7 +123,13 @@ async function renderContractorPortionsSettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  const allRules = await db.contractor_portions.toArray();
+  let allRules;
+  try {
+    allRules = await db.contractor_portions.toArray();
+  } catch (err) {
+    showToast('Could not load contractor portions.', 'error');
+    return;
+  }
   const today = new Date();
 
   container.innerHTML = `
@@ -216,9 +223,11 @@ function closeUpdatePortionModal() {
   portionModalState = null;
 }
 
-function handlePortionModalEscape(e) {
-  if (e.key === 'Escape') closeUpdatePortionModal();
-}
+const handlePortionModalEscape = createModalEscapeHandler(
+  () => document.getElementById('portion-modal-card'),
+  () => portionModalFormSnapshot,
+  closeUpdatePortionModal
+);
 
 function updatePortionModalHtml() {
   const s = portionModalState;
@@ -228,7 +237,7 @@ function updatePortionModalHtml() {
       <div class="card modal" id="portion-modal-card">
         <div class="modal-header">
           <h2>Update Portion — ${escapeHtml(s.contractorName)}</h2>
-          <button class="icon-btn" id="portion-modal-close" title="Close">${iconSvg('close', 16)}</button>
+          <button class="icon-btn" id="portion-modal-close" title="Close" aria-label="Close">${iconSvg('close', 16)}</button>
         </div>
         <div class="modal-body">
           <div class="form-section-grid">
@@ -269,6 +278,10 @@ function renderUpdatePortionModal() {
 }
 
 function attachUpdatePortionModalEvents() {
+  const modalCard = document.getElementById('portion-modal-card');
+  portionModalFormSnapshot = captureFormSnapshot(modalCard);
+  autofocusFirstField(modalCard);
+
   document.getElementById('portion-modal-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'portion-modal-backdrop') closeUpdatePortionModal();
   });
@@ -280,6 +293,7 @@ function attachUpdatePortionModalEvents() {
     document.getElementById('portion-contractor-pct').value = val === '' ? '' : round2(100 - Number(val));
   });
 
+  enableEnterToSubmit(modalCard, document.getElementById('portion-modal-save'));
   document.addEventListener('keydown', handlePortionModalEscape);
 }
 
@@ -305,16 +319,24 @@ async function handleSavePortion() {
     return;
   }
 
-  await saveContractorPortion({
-    contractor_name: portionModalState.contractorName,
-    lmp_pct: lmpPct,
-    valid_from: validFrom,
-    notes: notesInput.value.trim() || null
-  });
+  const saveBtn = document.getElementById('portion-modal-save');
+  setButtonLoading(saveBtn, true);
 
-  showToast(`Portion rule saved for ${portionModalState.contractorName}.`, 'success');
-  closeUpdatePortionModal();
-  await renderContractorPortionsSettings();
+  try {
+    await saveContractorPortion({
+      contractor_name: portionModalState.contractorName,
+      lmp_pct: lmpPct,
+      valid_from: validFrom,
+      notes: notesInput.value.trim() || null
+    });
+
+    showToast(`Portion rule saved for ${portionModalState.contractorName}.`, 'success');
+    closeUpdatePortionModal();
+    await renderContractorPortionsSettings();
+  } catch (err) {
+    setButtonLoading(saveBtn, false);
+    showToast('Could not save the portion rule. Please try again.', 'error');
+  }
 }
 
 async function saveContractorPortion({ contractor_name, lmp_pct, valid_from, notes }) {
@@ -345,12 +367,18 @@ async function renderImportHistorySettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  importHistoryPageState.history = await getImportHistory();
-  importHistoryPageState.expandedId = null;
-  importHistoryPageState.entries = {};
+  container.innerHTML = tableSkeletonHtml(4);
 
-  container.innerHTML = importHistoryPageHtml();
-  attachImportHistoryEvents();
+  try {
+    importHistoryPageState.history = await getImportHistory();
+    importHistoryPageState.expandedId = null;
+    importHistoryPageState.entries = {};
+
+    container.innerHTML = importHistoryPageHtml();
+    attachImportHistoryEvents();
+  } catch (err) {
+    showToast('Could not load import history.', 'error');
+  }
 }
 
 function importHistoryPageHtml() {
@@ -445,7 +473,7 @@ function importHistoryDetailHtml(entry) {
               <td class="mono">${importFormatDateTime(l.timestamp)}</td>
               <td class="mono">${escapeHtml(l.task_id || '')}</td>
               <td>${l.field_name ? escapeHtml(importFieldLabel(l.field_name)) : '<span style="color:var(--ink-3)">Task added</span>'}</td>
-              <td>${l.field_name ? `${escapeHtml(importFormatValue(l.field_name, l.old_value))} → ${escapeHtml(importFormatValue(l.field_name, l.new_value))}` : '—'}</td>
+              <td>${l.field_name ? `${importValueHtml(l.field_name, l.old_value)} → ${importValueHtml(l.field_name, l.new_value)}` : '<span style="color:var(--ink-3)">—</span>'}</td>
             </tr>`).join('')}
         </tbody>
       </table>
@@ -466,7 +494,12 @@ async function toggleImportHistoryExpand(importId) {
     if (!importHistoryPageState.entries[importId]) {
       const entry = importHistoryPageState.history.find(h => h.import_id === importId);
       if (entry) {
-        importHistoryPageState.entries[importId] = await getImportSessionAuditEntries(entry);
+        try {
+          importHistoryPageState.entries[importId] = await getImportSessionAuditEntries(entry);
+        } catch (err) {
+          showToast('Could not load import details.', 'error');
+          return;
+        }
       }
     }
   }
@@ -517,14 +550,18 @@ function auditFormatValue(field, value) {
   return String(value);
 }
 
+function auditValueDisplayHtml(formatted) {
+  return formatted === '—' ? '<span style="color:var(--ink-3)">—</span>' : escapeHtml(formatted);
+}
+
 function auditOldValueHtml(entry) {
   if (!entry.field_name) return '<span style="color:var(--ink-3)">—</span>';
-  return escapeHtml(auditFormatValue(entry.field_name, entry.old_value));
+  return auditValueDisplayHtml(auditFormatValue(entry.field_name, entry.old_value));
 }
 
 function auditNewValueHtml(entry) {
   if (!entry.field_name) return '<span style="color:var(--ink-3)">—</span>';
-  return `→ ${escapeHtml(auditFormatValue(entry.field_name, entry.new_value))}`;
+  return `→ ${auditValueDisplayHtml(auditFormatValue(entry.field_name, entry.new_value))}`;
 }
 
 let auditLogState = {
@@ -559,19 +596,25 @@ async function renderAuditLogSettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  const [rows, allUsers, allTasks] = await Promise.all([
-    buildAuditDisplayRows(),
-    db.users.toArray(),
-    db.tasks.toArray()
-  ]);
+  container.innerHTML = tableSkeletonHtml(5);
 
-  auditLogState.rows = rows;
-  auditLogState.usersById = Object.fromEntries(allUsers.map(u => [u.id, u.name]));
-  auditLogState.siteIdByTaskId = Object.fromEntries(allTasks.map(t => [t.id, t.physical_site_id]));
-  auditLogState.expandedSessionId = null;
+  try {
+    const [rows, allUsers, allTasks] = await Promise.all([
+      buildAuditDisplayRows(),
+      db.users.toArray(),
+      db.tasks.toArray()
+    ]);
 
-  container.innerHTML = auditLogPageHtml();
-  attachAuditLogEvents();
+    auditLogState.rows = rows;
+    auditLogState.usersById = Object.fromEntries(allUsers.map(u => [u.id, u.name]));
+    auditLogState.siteIdByTaskId = Object.fromEntries(allTasks.map(t => [t.id, t.physical_site_id]));
+    auditLogState.expandedSessionId = null;
+
+    container.innerHTML = auditLogPageHtml();
+    attachAuditLogEvents();
+  } catch (err) {
+    showToast('Could not load the audit log.', 'error');
+  }
 }
 
 function rowUserName(row) {
@@ -862,14 +905,18 @@ async function exportAuditLogExcel() {
     return;
   }
 
-  const ws = window.XLSX.utils.json_to_sheet(flatRows);
-  const wb = window.XLSX.utils.book_new();
-  window.XLSX.utils.book_append_sheet(wb, ws, 'Audit Log');
+  try {
+    const ws = window.XLSX.utils.json_to_sheet(flatRows);
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, 'Audit Log');
 
-  const filename = `audit_log_${formatDateISO(new Date())}.xlsx`;
-  window.XLSX.writeFile(wb, filename);
+    const filename = `audit_log_${formatDateISO(new Date())}.xlsx`;
+    window.XLSX.writeFile(wb, filename);
 
-  showToast(`Exported ${flatRows.length} audit log entr${flatRows.length === 1 ? 'y' : 'ies'}.`, 'success');
+    showToast(`Exported ${flatRows.length} audit log entr${flatRows.length === 1 ? 'y' : 'ies'}.`, 'success');
+  } catch (err) {
+    showToast('Could not export the audit log. Please try again.', 'error');
+  }
 }
 
 /* ==========================================================================
@@ -886,27 +933,31 @@ async function renderUserAccountsSettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  const [allUsers, allTasks] = await Promise.all([db.users.toArray(), db.tasks.toArray()]);
+  try {
+    const [allUsers, allTasks] = await Promise.all([db.users.toArray(), db.tasks.toArray()]);
 
-  userAccountsState.masterUsers = allUsers
-    .filter(u => MASTER_ROLES.includes(u.role))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    userAccountsState.masterUsers = allUsers
+      .filter(u => MASTER_ROLES.includes(u.role))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
-  userAccountsState.coordinators = allUsers
-    .filter(u => u.role === 'coordinator')
-    .sort((a, b) => {
-      if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
-      return a.name.localeCompare(b.name);
+    userAccountsState.coordinators = allUsers
+      .filter(u => u.role === 'coordinator')
+      .sort((a, b) => {
+        if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+    const counts = {};
+    allTasks.forEach(t => {
+      if (!t.is_deleted && t.coordinator_id) counts[t.coordinator_id] = (counts[t.coordinator_id] || 0) + 1;
     });
+    userAccountsState.taskCountByCoordinatorId = counts;
 
-  const counts = {};
-  allTasks.forEach(t => {
-    if (!t.is_deleted && t.coordinator_id) counts[t.coordinator_id] = (counts[t.coordinator_id] || 0) + 1;
-  });
-  userAccountsState.taskCountByCoordinatorId = counts;
-
-  container.innerHTML = userAccountsPageHtml();
-  attachUserAccountsEvents();
+    container.innerHTML = userAccountsPageHtml();
+    attachUserAccountsEvents();
+  } catch (err) {
+    showToast('Could not load user accounts.', 'error');
+  }
 }
 
 function userAccountsPageHtml() {
@@ -1066,6 +1117,7 @@ function attachUserAccountsEvents() {
    -------------------------------------------------------------------------- */
 
 let userFormModalState = null;
+let userFormModalFormSnapshot = null;
 
 function openUserFormModal({ mode, accountType, user }) {
   userFormModalState = {
@@ -1090,9 +1142,11 @@ function closeUserFormModal() {
   userFormModalState = null;
 }
 
-function handleUserFormModalEscape(e) {
-  if (e.key === 'Escape') closeUserFormModal();
-}
+const handleUserFormModalEscape = createModalEscapeHandler(
+  () => document.getElementById('user-form-card'),
+  () => userFormModalFormSnapshot,
+  closeUserFormModal
+);
 
 function userFormRoleFieldHtml(state) {
   if (state.values.role === 'project_manager') {
@@ -1123,7 +1177,7 @@ function userFormModalHtml(state) {
       <div class="card modal" id="user-form-card">
         <div class="modal-header">
           <h2>${title}</h2>
-          <button class="icon-btn" id="user-form-close">${iconSvg('close', 16)}</button>
+          <button class="icon-btn" id="user-form-close" aria-label="Close modal">${iconSvg('close', 16)}</button>
         </div>
         <div class="modal-body">
           <div class="form-section-grid">
@@ -1167,12 +1221,17 @@ function renderUserFormModal() {
 }
 
 function attachUserFormModalEvents() {
+  const modalCard = document.getElementById('user-form-card');
+  userFormModalFormSnapshot = captureFormSnapshot(modalCard);
+  autofocusFirstField(modalCard);
+
   document.getElementById('user-form-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'user-form-backdrop') closeUserFormModal();
   });
   document.getElementById('user-form-close').addEventListener('click', closeUserFormModal);
   document.getElementById('user-form-cancel').addEventListener('click', closeUserFormModal);
   document.getElementById('user-form-save').addEventListener('click', handleSaveUserForm);
+  enableEnterToSubmit(modalCard, document.getElementById('user-form-save'));
   document.addEventListener('keydown', handleUserFormModalEscape);
 
   const prefixInput = document.getElementById('user-form-prefix');
@@ -1245,28 +1304,36 @@ async function handleSaveUserForm() {
 
   if (hasError) return;
 
-  if (isEdit) {
-    const changes = { name, email };
-    if (isMaster) changes.role = role;
-    await db.users.update(state.userId, changes);
-    showToast('User updated.', 'success');
-  } else {
-    const password_hash = await hashPassword(password);
-    await db.users.add({
-      name,
-      email,
-      password_hash,
-      role: isMaster ? role : 'coordinator',
-      prefix: isMaster ? null : prefix,
-      is_active: true,
-      must_change_password: true,
-      created_at: new Date()
-    });
-    showToast(`${isMaster ? 'Master user' : 'Coordinator'} account created.`, 'success');
-  }
+  const saveBtn = document.getElementById('user-form-save');
+  setButtonLoading(saveBtn, true);
 
-  closeUserFormModal();
-  await renderUserAccountsSettings();
+  try {
+    if (isEdit) {
+      const changes = { name, email };
+      if (isMaster) changes.role = role;
+      await db.users.update(state.userId, changes);
+      showToast('User updated.', 'success');
+    } else {
+      const password_hash = await hashPassword(password);
+      await db.users.add({
+        name,
+        email,
+        password_hash,
+        role: isMaster ? role : 'coordinator',
+        prefix: isMaster ? null : prefix,
+        is_active: true,
+        must_change_password: true,
+        created_at: new Date()
+      });
+      showToast(`${isMaster ? 'Master user' : 'Coordinator'} account created.`, 'success');
+    }
+
+    closeUserFormModal();
+    await renderUserAccountsSettings();
+  } catch (err) {
+    setButtonLoading(saveBtn, false);
+    showToast('Could not save this user account. Please try again.', 'error');
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -1281,14 +1348,13 @@ function openResetPasswordModal(user) {
     root.innerHTML = '';
     document.removeEventListener('keydown', escHandler);
   };
-  const escHandler = (e) => { if (e.key === 'Escape') close(); };
 
   root.innerHTML = `
     <div class="modal-backdrop scale-in" id="reset-pw-backdrop">
       <div class="card modal" id="reset-pw-card">
         <div class="modal-header">
           <h2>Reset Password — ${escapeHtml(user.name)}</h2>
-          <button class="icon-btn" id="reset-pw-close">${iconSvg('close', 16)}</button>
+          <button class="icon-btn" id="reset-pw-close" aria-label="Close modal">${iconSvg('close', 16)}</button>
         </div>
         <div class="modal-body">
           <label class="field" for="reset-pw-input">
@@ -1303,6 +1369,12 @@ function openResetPasswordModal(user) {
         </div>
       </div>
     </div>`;
+
+  const modalCard = document.getElementById('reset-pw-card');
+  const formSnapshot = captureFormSnapshot(modalCard);
+  const escHandler = createModalEscapeHandler(() => document.getElementById('reset-pw-card'), () => formSnapshot, close);
+
+  autofocusFirstField(modalCard);
 
   document.getElementById('reset-pw-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'reset-pw-backdrop') close();
@@ -1320,13 +1392,23 @@ function openResetPasswordModal(user) {
       return;
     }
 
-    const password_hash = await hashPassword(password);
-    await db.users.update(user.id, { password_hash, must_change_password: true });
-    await writeAuditLog({ user_id: getCurrentUser().id, action: 'password_changed', field_name: 'name', new_value: user.name });
+    const confirmBtn = document.getElementById('reset-pw-confirm');
+    setButtonLoading(confirmBtn, true);
 
-    showToast(`Password reset for ${user.name}. They must set a new password on next login.`, 'success');
-    close();
+    try {
+      const password_hash = await hashPassword(password);
+      await db.users.update(user.id, { password_hash, must_change_password: true });
+      await writeAuditLog({ user_id: getCurrentUser().id, action: 'password_changed', field_name: 'name', new_value: user.name });
+
+      showToast(`Password reset for ${user.name}. They must set a new password on next login.`, 'success');
+      close();
+    } catch (err) {
+      setButtonLoading(confirmBtn, false);
+      showToast('Could not reset the password. Please try again.', 'error');
+      return;
+    }
   });
+  enableEnterToSubmit(modalCard, document.getElementById('reset-pw-confirm'));
   document.addEventListener('keydown', escHandler);
 }
 
@@ -1335,24 +1417,28 @@ function openResetPasswordModal(user) {
    -------------------------------------------------------------------------- */
 
 async function handleToggleActive(user) {
-  if (user.is_active) {
-    const taskCount = userAccountsState.taskCountByCoordinatorId[user.id] || 0;
-    const proceed = await confirmDialog({
-      title: 'Deactivate Coordinator',
-      message: `Deactivate ${user.name}? Their ${taskCount} task${taskCount === 1 ? '' : 's'} remain visible. Prefix ${user.prefix} is reserved permanently and can never be reused.`,
-      confirmLabel: 'Deactivate'
-    });
-    if (!proceed) return;
+  try {
+    if (user.is_active) {
+      const taskCount = userAccountsState.taskCountByCoordinatorId[user.id] || 0;
+      const proceed = await confirmDialog({
+        title: 'Deactivate Coordinator',
+        message: `Deactivate ${user.name}? Their ${taskCount} task${taskCount === 1 ? '' : 's'} remain visible. Prefix ${user.prefix} is reserved permanently and can never be reused.`,
+        confirmLabel: 'Deactivate'
+      });
+      if (!proceed) return;
 
-    const currentUser = getCurrentUser();
-    await db.users.update(user.id, { is_active: false, deactivated_at: new Date(), deactivated_by: currentUser.id });
-    showToast(`${user.name} deactivated.`, 'success');
-  } else {
-    await db.users.update(user.id, { is_active: true, deactivated_at: null, deactivated_by: null });
-    showToast(`${user.name} reactivated.`, 'success');
+      const currentUser = getCurrentUser();
+      await db.users.update(user.id, { is_active: false, deactivated_at: new Date(), deactivated_by: currentUser.id });
+      showToast(`${user.name} deactivated.`, 'success');
+    } else {
+      await db.users.update(user.id, { is_active: true, deactivated_at: null, deactivated_by: null });
+      showToast(`${user.name} reactivated.`, 'success');
+    }
+
+    await renderUserAccountsSettings();
+  } catch (err) {
+    showToast(`Could not update ${user.name}'s account. Please try again.`, 'error');
   }
-
-  await renderUserAccountsSettings();
 }
 
 /* --------------------------------------------------------------------------
@@ -1445,7 +1531,7 @@ function reassignModalHtml() {
       <div class="card modal" id="reassign-card">
         <div class="modal-header">
           <h2>Reassign Tasks — ${escapeHtml(s.oldCoordinator.name)}</h2>
-          <button class="icon-btn" id="reassign-close">${iconSvg('close', 16)}</button>
+          <button class="icon-btn" id="reassign-close" aria-label="Close modal">${iconSvg('close', 16)}</button>
         </div>
         <div class="modal-body">${reassignModalBodyHtml()}</div>
         <div class="modal-footer">${reassignModalFooterHtml()}</div>
@@ -1461,6 +1547,8 @@ function renderReassignModal() {
 }
 
 function attachReassignModalEvents() {
+  autofocusFirstField(document.getElementById('reassign-card'));
+
   document.getElementById('reassign-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'reassign-backdrop') closeReassignModal();
   });
@@ -1494,8 +1582,13 @@ async function handleReassignNext() {
       return;
     }
     s.newCoordinatorId = Number(value);
-    const tasks = await getTasksManagedBy(s.oldCoordinator.id);
-    s.taskCount = tasks.length;
+    try {
+      const tasks = await getTasksManagedBy(s.oldCoordinator.id);
+      s.taskCount = tasks.length;
+    } catch (err) {
+      showToast('Could not load this coordinator\'s tasks. Please try again.', 'error');
+      return;
+    }
     s.step = 2;
     renderReassignModal();
     return;
@@ -1517,26 +1610,34 @@ async function handleReassignNext() {
     return;
   }
 
-  const newCoordinator = s.activeCoordinators.find(c => c.id === s.newCoordinatorId);
-  const tasks = await getTasksManagedBy(s.oldCoordinator.id);
-  const currentUser = getCurrentUser();
+  const nextBtn = document.getElementById('reassign-next');
+  setButtonLoading(nextBtn, true, 'Reassigning…');
 
-  await db.transaction('rw', db.tasks, db.audit_log, async () => {
-    for (const task of tasks) {
-      await db.tasks.update(task.id, { managed_by_id: newCoordinator.id, updated_at: new Date() });
-    }
-    await writeAuditLog({
-      user_id: currentUser.id,
-      action: 'tasks_reassigned',
-      field_name: 'coordinator',
-      old_value: `${s.oldCoordinator.name} (${tasks.length} tasks)`,
-      new_value: newCoordinator.name
+  try {
+    const newCoordinator = s.activeCoordinators.find(c => c.id === s.newCoordinatorId);
+    const tasks = await getTasksManagedBy(s.oldCoordinator.id);
+    const currentUser = getCurrentUser();
+
+    await db.transaction('rw', db.tasks, db.audit_log, async () => {
+      for (const task of tasks) {
+        await db.tasks.update(task.id, { managed_by_id: newCoordinator.id, updated_at: new Date() });
+      }
+      await writeAuditLog({
+        user_id: currentUser.id,
+        action: 'tasks_reassigned',
+        field_name: 'coordinator',
+        old_value: `${s.oldCoordinator.name} (${tasks.length} tasks)`,
+        new_value: newCoordinator.name
+      });
     });
-  });
 
-  showToast(`${tasks.length} task${tasks.length === 1 ? '' : 's'} reassigned from ${s.oldCoordinator.name} to ${newCoordinator.name}.`, 'success');
-  closeReassignModal();
-  await renderUserAccountsSettings();
+    showToast(`${tasks.length} task${tasks.length === 1 ? '' : 's'} reassigned from ${s.oldCoordinator.name} to ${newCoordinator.name}.`, 'success');
+    closeReassignModal();
+    await renderUserAccountsSettings();
+  } catch (err) {
+    setButtonLoading(nextBtn, false);
+    showToast('Reassignment failed. No changes were saved — please try again.', 'error');
+  }
 }
 
 /* ==========================================================================
@@ -1618,7 +1719,7 @@ function dropdownChipHtml(list, value) {
     <span class="dropdown-chip">
       <span class="dropdown-chip-handle" title="Drag to reorder">${iconSvg('rows', 11)}</span>
       <span class="dropdown-chip-label">${escapeHtml(value)}</span>
-      ${isSystem ? '' : `<button class="dropdown-chip-remove" data-remove-list="${list.key}" data-value="${escapeHtml(value)}" title="Remove">${iconSvg('close', 10)}</button>`}
+      ${isSystem ? '' : `<button class="dropdown-chip-remove" data-remove-list="${list.key}" data-value="${escapeHtml(value)}" title="Remove" aria-label="Remove">${iconSvg('close', 10)}</button>`}
     </span>`;
 }
 
@@ -1643,7 +1744,7 @@ function distanceBandRowHtml(d) {
       <span class="dropdown-chip-handle" title="Drag to reorder">${iconSvg('rows', 11)}</span>
       <span class="distance-band-name">${escapeHtml(d.band)}</span>
       <input type="number" step="0.01" class="input num distance-multiplier-input" data-band="${escapeHtml(d.band)}" value="${d.multiplier}">
-      <button class="dropdown-chip-remove" data-remove-distance="${escapeHtml(d.band)}" title="Remove">${iconSvg('close', 10)}</button>
+      <button class="dropdown-chip-remove" data-remove-distance="${escapeHtml(d.band)}" title="Remove" aria-label="Remove">${iconSvg('close', 10)}</button>
     </div>`;
 }
 
@@ -1676,16 +1777,28 @@ async function handleAddDropdownValue(listKey) {
   }
 
   list.array.push(value);
-  await persistDropdownList(list);
-  showToast(`"${value}" added to ${list.label}.`, 'success');
-  renderDropdownListsSettings();
+  try {
+    await persistDropdownList(list);
+    showToast(`"${value}" added to ${list.label}.`, 'success');
+    renderDropdownListsSettings();
+  } catch (err) {
+    list.array.pop();
+    showToast('Could not save this value. Please try again.', 'error');
+  }
 }
 
 async function handleRemoveDropdownValue(listKey, value) {
   const list = SIMPLE_DROPDOWN_LISTS.find(l => l.key === listKey);
   if (!list || list.systemValues.includes(value)) return;
 
-  const count = await getDropdownUsageCount(list.taskField, value);
+  let count;
+  try {
+    count = await getDropdownUsageCount(list.taskField, value);
+  } catch (err) {
+    showToast('Could not check usage for this value. Please try again.', 'error');
+    return;
+  }
+
   if (count > 0) {
     const proceed = await confirmDialog({
       title: 'Value in use',
@@ -1698,9 +1811,14 @@ async function handleRemoveDropdownValue(listKey, value) {
   const idx = list.array.indexOf(value);
   if (idx === -1) return;
   list.array.splice(idx, 1);
-  await persistDropdownList(list);
-  showToast(`"${value}" removed from ${list.label}.`, 'success');
-  renderDropdownListsSettings();
+  try {
+    await persistDropdownList(list);
+    showToast(`"${value}" removed from ${list.label}.`, 'success');
+    renderDropdownListsSettings();
+  } catch (err) {
+    list.array.splice(idx, 0, value);
+    showToast('Could not remove this value. Please try again.', 'error');
+  }
 }
 
 async function handleAddDistanceBand() {
@@ -1721,9 +1839,15 @@ async function handleAddDistanceBand() {
 
   DISTANCE_LIST.push({ band, multiplier: round2(multiplier) });
   syncDistanceBandsFromList();
-  await persistDistanceList();
-  showToast(`"${band}" added.`, 'success');
-  renderDropdownListsSettings();
+  try {
+    await persistDistanceList();
+    showToast(`"${band}" added.`, 'success');
+    renderDropdownListsSettings();
+  } catch (err) {
+    DISTANCE_LIST.pop();
+    syncDistanceBandsFromList();
+    showToast('Could not add this distance band. Please try again.', 'error');
+  }
 }
 
 async function handleDistanceMultiplierChange(band, value) {
@@ -1737,13 +1861,26 @@ async function handleDistanceMultiplierChange(band, value) {
     return;
   }
 
+  const previousMultiplier = entry.multiplier;
   entry.multiplier = round2(multiplier);
-  await persistDistanceList();
-  showToast(`Multiplier for ${band} updated.`, 'success', 1600);
+  try {
+    await persistDistanceList();
+    showToast(`Multiplier for ${band} updated.`, 'success', 1600);
+  } catch (err) {
+    entry.multiplier = previousMultiplier;
+    showToast('Could not update the multiplier. Please try again.', 'error');
+  }
 }
 
 async function handleRemoveDistanceBand(band) {
-  const count = await getDropdownUsageCount('distance', band);
+  let count;
+  try {
+    count = await getDropdownUsageCount('distance', band);
+  } catch (err) {
+    showToast('Could not check usage for this band. Please try again.', 'error');
+    return;
+  }
+
   if (count > 0) {
     showToast(`Cannot delete: ${count} task${count === 1 ? '' : 's'} use this band.`, 'error');
     return;
@@ -1751,11 +1888,17 @@ async function handleRemoveDistanceBand(band) {
 
   const idx = DISTANCE_LIST.findIndex(d => d.band === band);
   if (idx === -1) return;
-  DISTANCE_LIST.splice(idx, 1);
+  const [removed] = DISTANCE_LIST.splice(idx, 1);
   syncDistanceBandsFromList();
-  await persistDistanceList();
-  showToast(`"${band}" removed.`, 'success');
-  renderDropdownListsSettings();
+  try {
+    await persistDistanceList();
+    showToast(`"${band}" removed.`, 'success');
+    renderDropdownListsSettings();
+  } catch (err) {
+    DISTANCE_LIST.splice(idx, 0, removed);
+    syncDistanceBandsFromList();
+    showToast('Could not remove this distance band. Please try again.', 'error');
+  }
 }
 
 function attachDropdownListsEvents() {
@@ -1768,7 +1911,7 @@ function attachDropdownListsEvents() {
 
   SIMPLE_DROPDOWN_LISTS.forEach(list => {
     attachDragReorder(`[data-dropdown-chips="${list.key}"]`, '.dropdown-chip', list.array, () => {
-      persistDropdownList(list);
+      persistDropdownList(list).catch(() => showToast('Could not save the new order.', 'error'));
       renderDropdownListsSettings();
     });
 
@@ -1792,7 +1935,7 @@ function attachDropdownListsEvents() {
 
   attachDragReorder('.distance-band-list', '.distance-band-row', DISTANCE_LIST, () => {
     syncDistanceBandsFromList();
-    persistDistanceList();
+    persistDistanceList().catch(() => showToast('Could not save the new order.', 'error'));
     renderDropdownListsSettings();
   });
 }
@@ -1807,10 +1950,13 @@ async function renderColumnManagerSettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  columnManagerState.visibility = await loadMasterColumnVisibility();
-
-  container.innerHTML = columnManagerPageHtml();
-  attachColumnManagerEvents();
+  try {
+    columnManagerState.visibility = await loadMasterColumnVisibility();
+    container.innerHTML = columnManagerPageHtml();
+    attachColumnManagerEvents();
+  } catch (err) {
+    showToast('Could not load column settings.', 'error');
+  }
 }
 
 function columnManagerRowHtml(col) {
@@ -1851,21 +1997,33 @@ function attachColumnManagerEvents() {
   document.querySelectorAll('[data-toggle-col]').forEach(cb => {
     cb.addEventListener('change', async (e) => {
       columnManagerState.visibility[e.target.dataset.toggleCol] = e.target.checked;
-      await saveMasterColumnVisibility(columnManagerState.visibility);
-      showToast('Column visibility updated.', 'success', 1400);
+      try {
+        await saveMasterColumnVisibility(columnManagerState.visibility);
+        showToast('Column visibility updated.', 'success', 1400);
+      } catch (err) {
+        showToast('Could not save column visibility.', 'error');
+      }
     });
   });
 
   attachDragReorder('[data-column-section="coordinator"]', '.column-manager-row', COORDINATOR_COLUMNS, async () => {
     syncAllMasterColumns();
-    await saveColumnOrder();
-    renderColumnManagerSettings();
+    try {
+      await saveColumnOrder();
+      renderColumnManagerSettings();
+    } catch (err) {
+      showToast('Could not save column order.', 'error');
+    }
   }, (idx) => !!COORDINATOR_COLUMNS[idx].alwaysVisible);
 
   attachDragReorder('[data-column-section="pm"]', '.column-manager-row', PM_COLUMNS, async () => {
     syncAllMasterColumns();
-    await saveColumnOrder();
-    renderColumnManagerSettings();
+    try {
+      await saveColumnOrder();
+      renderColumnManagerSettings();
+    } catch (err) {
+      showToast('Could not save column order.', 'error');
+    }
   }, (idx) => !!PM_COLUMNS[idx].alwaysVisible);
 }
 
@@ -1879,12 +2037,16 @@ async function renderTaskTemplatesSettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  const templates = await db.task_templates.orderBy('name').toArray();
-  const counts = await Promise.all(templates.map(t => db.task_template_items.where('template_id').equals(t.id).count()));
-  taskTemplatesState.templates = templates.map((t, i) => ({ ...t, itemCount: counts[i] }));
+  try {
+    const templates = await db.task_templates.orderBy('name').toArray();
+    const counts = await Promise.all(templates.map(t => db.task_template_items.where('template_id').equals(t.id).count()));
+    taskTemplatesState.templates = templates.map((t, i) => ({ ...t, itemCount: counts[i] }));
 
-  container.innerHTML = taskTemplatesPageHtml();
-  attachTaskTemplatesEvents();
+    container.innerHTML = taskTemplatesPageHtml();
+    attachTaskTemplatesEvents();
+  } catch (err) {
+    showToast('Could not load task templates.', 'error');
+  }
 }
 
 function taskTemplatesPageHtml() {
@@ -1948,72 +2110,84 @@ function attachTaskTemplatesEvents() {
 }
 
 async function handleToggleTemplateActive(id, isActive) {
-  await db.task_templates.update(id, { is_active: isActive, updated_at: new Date() });
-  showToast(isActive ? 'Template activated.' : 'Template deactivated.', 'success');
-  renderTaskTemplatesSettings();
+  try {
+    await db.task_templates.update(id, { is_active: isActive, updated_at: new Date() });
+    showToast(isActive ? 'Template activated.' : 'Template deactivated.', 'success');
+    renderTaskTemplatesSettings();
+  } catch (err) {
+    showToast('Could not update the template. Please try again.', 'error');
+  }
 }
 
 async function handleDuplicateTemplate(id) {
-  const template = await db.task_templates.get(id);
-  if (!template) return;
+  try {
+    const template = await db.task_templates.get(id);
+    if (!template) return;
 
-  const items = await db.task_template_items.where('template_id').equals(id).sortBy('sort_order');
-  const currentUser = getCurrentUser();
-  const now = new Date();
+    const items = await db.task_template_items.where('template_id').equals(id).sortBy('sort_order');
+    const currentUser = getCurrentUser();
+    const now = new Date();
 
-  const newId = await db.task_templates.add({
-    name: `${template.name} (copy)`,
-    description: template.description || null,
-    created_by: currentUser.id,
-    created_at: now,
-    updated_at: now,
-    is_active: true,
-    times_applied: 0
-  });
+    const newId = await db.task_templates.add({
+      name: `${template.name} (copy)`,
+      description: template.description || null,
+      created_by: currentUser.id,
+      created_at: now,
+      updated_at: now,
+      is_active: true,
+      times_applied: 0
+    });
 
-  if (items.length > 0) {
-    await db.task_template_items.bulkAdd(items.map(item => ({
-      template_id: newId,
-      line_item_code: item.line_item_code,
-      default_qty: item.default_qty,
-      sort_order: item.sort_order
-    })));
+    if (items.length > 0) {
+      await db.task_template_items.bulkAdd(items.map(item => ({
+        template_id: newId,
+        line_item_code: item.line_item_code,
+        default_qty: item.default_qty,
+        sort_order: item.sort_order
+      })));
+    }
+
+    showToast(`"${template.name} (copy)" created.`, 'success');
+    renderTaskTemplatesSettings();
+  } catch (err) {
+    showToast('Could not duplicate the template. Please try again.', 'error');
   }
-
-  showToast(`"${template.name} (copy)" created.`, 'success');
-  renderTaskTemplatesSettings();
 }
 
 async function handleDeleteTemplate(id) {
-  const template = await db.task_templates.get(id);
-  if (!template) return;
+  try {
+    const template = await db.task_templates.get(id);
+    if (!template) return;
 
-  const usageCount = template.times_applied || 0;
+    const usageCount = template.times_applied || 0;
 
-  if (usageCount > 0) {
-    const proceed = await confirmDialog({
-      title: 'Delete Template',
-      message: `"${template.name}" has been used in ${usageCount} past bulk entr${usageCount === 1 ? 'y' : 'ies'}. It will be deactivated and hidden from coordinators instead of deleted.`,
-      confirmLabel: 'Deactivate'
-    });
-    if (!proceed) return;
+    if (usageCount > 0) {
+      const proceed = await confirmDialog({
+        title: 'Delete Template',
+        message: `"${template.name}" has been used in ${usageCount} past bulk entr${usageCount === 1 ? 'y' : 'ies'}. It will be deactivated and hidden from coordinators instead of deleted.`,
+        confirmLabel: 'Deactivate'
+      });
+      if (!proceed) return;
 
-    await db.task_templates.update(id, { is_active: false, updated_at: new Date() });
-    showToast(`"${template.name}" deactivated.`, 'success');
-  } else {
-    const proceed = await confirmDialog({
-      title: 'Delete Template',
-      message: `Delete "${template.name}"? This cannot be undone.`,
-      confirmLabel: 'Delete'
-    });
-    if (!proceed) return;
+      await db.task_templates.update(id, { is_active: false, updated_at: new Date() });
+      showToast(`"${template.name}" deactivated.`, 'success');
+    } else {
+      const proceed = await confirmDialog({
+        title: 'Delete Template',
+        message: `Delete "${template.name}"? This cannot be undone.`,
+        confirmLabel: 'Delete'
+      });
+      if (!proceed) return;
 
-    await db.task_template_items.where('template_id').equals(id).delete();
-    await db.task_templates.delete(id);
-    showToast(`"${template.name}" deleted.`, 'success');
+      await db.task_template_items.where('template_id').equals(id).delete();
+      await db.task_templates.delete(id);
+      showToast(`"${template.name}" deleted.`, 'success');
+    }
+
+    renderTaskTemplatesSettings();
+  } catch (err) {
+    showToast('Could not delete the template. Please try again.', 'error');
   }
-
-  renderTaskTemplatesSettings();
 }
 
 /* --------------------------------------------------------------------------
@@ -2021,33 +2195,38 @@ async function handleDeleteTemplate(id) {
    -------------------------------------------------------------------------- */
 
 let templateFormState = null;
+let templateFormSnapshot = null;
 
 async function openTemplateFormModal(templateId) {
-  const lineItemResult = await getLineItemOptionsForDate(null);
+  try {
+    const lineItemResult = await getLineItemOptionsForDate(null);
 
-  let name = '';
-  let description = '';
-  let items = [];
+    let name = '';
+    let description = '';
+    let items = [];
 
-  if (templateId) {
-    const template = await db.task_templates.get(templateId);
-    const templateItems = await db.task_template_items.where('template_id').equals(templateId).sortBy('sort_order');
-    name = template.name;
-    description = template.description || '';
-    items = templateItems.map(i => ({ line_item_code: i.line_item_code, default_qty: i.default_qty }));
+    if (templateId) {
+      const template = await db.task_templates.get(templateId);
+      const templateItems = await db.task_template_items.where('template_id').equals(templateId).sortBy('sort_order');
+      name = template.name;
+      description = template.description || '';
+      items = templateItems.map(i => ({ line_item_code: i.line_item_code, default_qty: i.default_qty }));
+    }
+
+    templateFormState = {
+      templateId,
+      name,
+      description,
+      items,
+      catalogItems: lineItemResult.items,
+      noCatalog: lineItemResult.warning === 'no_catalog',
+      search: ''
+    };
+
+    renderTemplateFormModal();
+  } catch (err) {
+    showToast('Could not open the template editor. Please try again.', 'error');
   }
-
-  templateFormState = {
-    templateId,
-    name,
-    description,
-    items,
-    catalogItems: lineItemResult.items,
-    noCatalog: lineItemResult.warning === 'no_catalog',
-    search: ''
-  };
-
-  renderTemplateFormModal();
 }
 
 function closeTemplateFormModal() {
@@ -2055,11 +2234,14 @@ function closeTemplateFormModal() {
   if (root) root.innerHTML = '';
   document.removeEventListener('keydown', handleTemplateFormModalEscape);
   templateFormState = null;
+  templateFormSnapshot = null;
 }
 
-function handleTemplateFormModalEscape(e) {
-  if (e.key === 'Escape') closeTemplateFormModal();
-}
+const handleTemplateFormModalEscape = createModalEscapeHandler(
+  () => document.getElementById('template-form-card'),
+  () => templateFormSnapshot,
+  closeTemplateFormModal
+);
 
 function templateItemRowHtml(item, idx, catalogItems) {
   const meta = catalogItems.find(c => c.code === item.line_item_code);
@@ -2073,7 +2255,7 @@ function templateItemRowHtml(item, idx, catalogItems) {
       <label class="template-item-qty-label">Default qty:
         <input type="number" step="0.01" class="input num template-item-qty-input" data-index="${idx}" value="${item.default_qty === null || item.default_qty === undefined ? '' : item.default_qty}">
       </label>
-      <button class="dropdown-chip-remove" data-remove-item="${idx}" title="Remove">${iconSvg('close', 10)}</button>
+      <button class="dropdown-chip-remove" data-remove-item="${idx}" title="Remove" aria-label="Remove">${iconSvg('close', 10)}</button>
     </div>`;
 }
 
@@ -2086,7 +2268,7 @@ function templateFormModalHtml() {
       <div class="card modal wide" id="template-form-card">
         <div class="modal-header">
           <h2>${isEdit ? 'Edit Template' : 'New Template'}</h2>
-          <button class="icon-btn" id="template-form-close">${iconSvg('close', 16)}</button>
+          <button class="icon-btn" id="template-form-close" aria-label="Close modal">${iconSvg('close', 16)}</button>
         </div>
         <div class="modal-body">
           <label class="field" for="template-name-input">
@@ -2168,17 +2350,30 @@ function handleRemoveTemplateItem(idx) {
 }
 
 function attachTemplateFormModalEvents() {
+  const modalCard = document.getElementById('template-form-card');
+  const isFirstRender = templateFormSnapshot === null;
+  if (isFirstRender) {
+    templateFormSnapshot = captureFormSnapshot(modalCard);
+    autofocusFirstField(modalCard);
+  }
+
   document.getElementById('template-form-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'template-form-backdrop') closeTemplateFormModal();
   });
   document.getElementById('template-form-close').addEventListener('click', closeTemplateFormModal);
   document.getElementById('template-form-cancel').addEventListener('click', closeTemplateFormModal);
   document.getElementById('template-form-save').addEventListener('click', handleSaveTemplate);
+  enableEnterToSubmit(modalCard, document.getElementById('template-form-save'));
   document.addEventListener('keydown', handleTemplateFormModalEscape);
 
+  let templateSearchTimer = null;
   document.getElementById('template-item-search').addEventListener('input', (e) => {
-    templateFormState.search = e.target.value;
-    renderTemplateItemSearchResults();
+    clearTimeout(templateSearchTimer);
+    const value = e.target.value;
+    templateSearchTimer = setTimeout(() => {
+      templateFormState.search = value;
+      renderTemplateItemSearchResults();
+    }, 300);
   });
 
   document.querySelectorAll('[data-remove-item]').forEach(btn => {
@@ -2216,37 +2411,45 @@ async function handleSaveTemplate() {
     return;
   }
 
-  const currentUser = getCurrentUser();
-  const now = new Date();
-  let templateId = s.templateId;
+  const saveBtn = document.getElementById('template-form-save');
+  setButtonLoading(saveBtn, true);
 
-  if (templateId) {
-    await db.task_templates.update(templateId, { name, description: descInput.value.trim() || null, updated_at: now });
-    await db.task_template_items.where('template_id').equals(templateId).delete();
-  } else {
-    templateId = await db.task_templates.add({
-      name,
-      description: descInput.value.trim() || null,
-      created_by: currentUser.id,
-      created_at: now,
-      updated_at: now,
-      is_active: true,
-      times_applied: 0
-    });
+  try {
+    const currentUser = getCurrentUser();
+    const now = new Date();
+    let templateId = s.templateId;
+
+    if (templateId) {
+      await db.task_templates.update(templateId, { name, description: descInput.value.trim() || null, updated_at: now });
+      await db.task_template_items.where('template_id').equals(templateId).delete();
+    } else {
+      templateId = await db.task_templates.add({
+        name,
+        description: descInput.value.trim() || null,
+        created_by: currentUser.id,
+        created_at: now,
+        updated_at: now,
+        is_active: true,
+        times_applied: 0
+      });
+    }
+
+    if (s.items.length > 0) {
+      await db.task_template_items.bulkAdd(s.items.map((item, idx) => ({
+        template_id: templateId,
+        line_item_code: item.line_item_code,
+        default_qty: item.default_qty,
+        sort_order: idx
+      })));
+    }
+
+    showToast(`Template "${name}" saved.`, 'success');
+    closeTemplateFormModal();
+    renderTaskTemplatesSettings();
+  } catch (err) {
+    setButtonLoading(saveBtn, false);
+    showToast('Could not save the template. Please try again.', 'error');
   }
-
-  if (s.items.length > 0) {
-    await db.task_template_items.bulkAdd(s.items.map((item, idx) => ({
-      template_id: templateId,
-      line_item_code: item.line_item_code,
-      default_qty: item.default_qty,
-      sort_order: idx
-    })));
-  }
-
-  showToast(`Template "${name}" saved.`, 'success');
-  closeTemplateFormModal();
-  renderTaskTemplatesSettings();
 }
 
 /* ==========================================================================
@@ -2278,18 +2481,22 @@ async function renderMyDefaultsSettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  const user = getCurrentUser();
-  const [defaultsSetting, streamResult, templates] = await Promise.all([
-    db.app_settings.get(`user_defaults_${user.id}`),
-    getActiveStreamNames(null),
-    db.task_templates.filter(t => t.is_active).toArray()
-  ]);
+  try {
+    const user = getCurrentUser();
+    const [defaultsSetting, streamResult, templates] = await Promise.all([
+      db.app_settings.get(`user_defaults_${user.id}`),
+      getActiveStreamNames(null),
+      db.task_templates.filter(t => t.is_active).toArray()
+    ]);
 
-  const defaults = (defaultsSetting && defaultsSetting.value) || {};
-  const streamNames = streamResult.items.map(s => s.stream_name);
+    const defaults = (defaultsSetting && defaultsSetting.value) || {};
+    const streamNames = streamResult.items.map(s => s.stream_name);
 
-  container.innerHTML = myDefaultsPageHtml(defaults, streamNames, templates);
-  attachMyDefaultsEvents();
+    container.innerHTML = myDefaultsPageHtml(defaults, streamNames, templates);
+    attachMyDefaultsEvents();
+  } catch (err) {
+    showToast('Could not load your defaults.', 'error');
+  }
 }
 
 function myDefaultsPageHtml(defaults, streamNames, templates) {
@@ -2331,17 +2538,29 @@ function collectMyDefaultsFormData() {
 }
 
 async function handleSaveMyDefaults() {
-  const user = getCurrentUser();
-  const data = collectMyDefaultsFormData();
-  await db.app_settings.put({ key: `user_defaults_${user.id}`, value: data, updated_at: new Date() });
-  showToast('Defaults saved.', 'success');
+  const btn = document.getElementById('save-defaults-btn');
+  setButtonLoading(btn, true);
+  try {
+    const user = getCurrentUser();
+    const data = collectMyDefaultsFormData();
+    await db.app_settings.put({ key: `user_defaults_${user.id}`, value: data, updated_at: new Date() });
+    showToast('Defaults saved.', 'success');
+  } catch (err) {
+    showToast('Could not save your defaults. Please try again.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
 }
 
 async function handleClearMyDefaults() {
-  const user = getCurrentUser();
-  await db.app_settings.put({ key: `user_defaults_${user.id}`, value: {}, updated_at: new Date() });
-  showToast('Defaults cleared.', 'success');
-  renderMyDefaultsSettings();
+  try {
+    const user = getCurrentUser();
+    await db.app_settings.put({ key: `user_defaults_${user.id}`, value: {}, updated_at: new Date() });
+    showToast('Defaults cleared.', 'success');
+    renderMyDefaultsSettings();
+  } catch (err) {
+    showToast('Could not clear your defaults. Please try again.', 'error');
+  }
 }
 
 function attachMyDefaultsEvents() {
@@ -2369,15 +2588,19 @@ async function renderDeletedTasksSettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  const user = getCurrentUser();
-  await loadUsersByIdCache();
+  try {
+    const user = getCurrentUser();
+    await loadUsersByIdCache();
 
-  const deleted = await getDeletedTasks(user.id);
-  deleted.sort((a, b) => new Date(b.deleted_at) - new Date(a.deleted_at));
-  deletedTasksState.rows = deleted;
+    const deleted = await getDeletedTasks(user.id);
+    deleted.sort((a, b) => new Date(b.deleted_at) - new Date(a.deleted_at));
+    deletedTasksState.rows = deleted;
 
-  container.innerHTML = deletedTasksPageHtml();
-  attachDeletedTasksEvents();
+    container.innerHTML = deletedTasksPageHtml();
+    attachDeletedTasksEvents();
+  } catch (err) {
+    showToast('Could not load deleted tasks.', 'error');
+  }
 }
 
 function deletedTasksPageHtml() {
@@ -2453,13 +2676,17 @@ function attachDeletedTasksEvents() {
 }
 
 async function handleRecoverTask(id) {
-  const result = await recoverTask(id);
-  if (result && result.error) {
-    showToast(result.error, 'error');
-    return;
+  try {
+    const result = await recoverTask(id);
+    if (result && result.error) {
+      showToast(result.error, 'error');
+      return;
+    }
+    showToast('Task recovered.', 'success');
+    renderDeletedTasksSettings();
+  } catch (err) {
+    showToast('Could not recover this task. Please try again.', 'error');
   }
-  showToast('Task recovered.', 'success');
-  renderDeletedTasksSettings();
 }
 
 window.renderSettings = renderSettings;

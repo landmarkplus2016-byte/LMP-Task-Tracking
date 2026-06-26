@@ -57,25 +57,34 @@ function downloadBlob(content, filename, mimeType) {
 }
 
 async function exportCoordinatorJSON() {
-  const currentUser = getCurrentUser();
-  const tasks = await getMyTasks(currentUser.id);
-  const cleanTasks = tasks.map(sanitizeTaskForExport);
+  const btn = document.getElementById('export-json-btn');
+  setButtonLoading(btn, true);
 
-  const payload = {
-    exported_at: new Date().toISOString(),
-    coordinator_id: currentUser.id,
-    coordinator_name: currentUser.name,
-    prefix: currentUser.prefix,
-    version: '1.0',
-    tasks: cleanTasks
-  };
+  try {
+    const currentUser = getCurrentUser();
+    const tasks = await getMyTasks(currentUser.id);
+    const cleanTasks = tasks.map(sanitizeTaskForExport);
 
-  const filename = `${sanitizeFilenamePart(currentUser.prefix)}_tasks_${formatDateISO(new Date())}.json`;
-  downloadBlob(JSON.stringify(payload, null, 2), filename, 'application/json');
+    const payload = {
+      exported_at: new Date().toISOString(),
+      coordinator_id: currentUser.id,
+      coordinator_name: currentUser.name,
+      prefix: currentUser.prefix,
+      version: '1.0',
+      tasks: cleanTasks
+    };
 
-  await writeAuditLog({ user_id: currentUser.id, action: 'export_created' });
+    const filename = `${sanitizeFilenamePart(currentUser.prefix)}_tasks_${formatDateISO(new Date())}.json`;
+    downloadBlob(JSON.stringify(payload, null, 2), filename, 'application/json');
 
-  showToast(`Exported ${tasks.length} task${tasks.length === 1 ? '' : 's'}. Send this file to your PM.`, 'success');
+    await writeAuditLog({ user_id: currentUser.id, action: 'export_created' });
+
+    showToast(`Exported ${tasks.length} task${tasks.length === 1 ? '' : 's'}. Send this file to your PM.`, 'success');
+  } catch (err) {
+    showToast('Could not export your tasks. Please try again.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
 }
 
 function autoFitColWidths(header, rows) {
@@ -131,19 +140,28 @@ function buildCoordinatorSheet(tasks) {
 }
 
 async function exportCoordinatorExcel() {
-  const currentUser = getCurrentUser();
-  const tasks = await getMyTasks(currentUser.id);
+  const btn = document.getElementById('export-excel-btn');
+  setButtonLoading(btn, true);
 
-  const ws = buildCoordinatorSheet(tasks);
-  const wb = window.XLSX.utils.book_new();
-  window.XLSX.utils.book_append_sheet(wb, ws, 'My Tasks');
+  try {
+    const currentUser = getCurrentUser();
+    const tasks = await getMyTasks(currentUser.id);
 
-  const filename = `${sanitizeFilenamePart(currentUser.name)}_tasks_${formatDateISO(new Date())}.xlsx`;
-  window.XLSX.writeFile(wb, filename, { cellStyles: true });
+    const ws = buildCoordinatorSheet(tasks);
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, 'My Tasks');
 
-  await writeAuditLog({ user_id: currentUser.id, action: 'export_created' });
+    const filename = `${sanitizeFilenamePart(currentUser.name)}_tasks_${formatDateISO(new Date())}.xlsx`;
+    window.XLSX.writeFile(wb, filename, { cellStyles: true });
 
-  showToast(`Exported ${tasks.length} task${tasks.length === 1 ? '' : 's'} to Excel.`, 'success');
+    await writeAuditLog({ user_id: currentUser.id, action: 'export_created' });
+
+    showToast(`Exported ${tasks.length} task${tasks.length === 1 ? '' : 's'} to Excel.`, 'success');
+  } catch (err) {
+    showToast('Could not export to Excel. Please try again.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
 }
 
 /* ==========================================================================
@@ -329,29 +347,32 @@ async function buildAuditLogSheet() {
 }
 
 async function runMasterExcelExport(filters, includeAuditLog) {
-  const currentUser = getCurrentUser();
-  const allTasks = await getAllTasks();
-  const tasks = filterTasksForExport(allTasks, filters);
+  try {
+    const currentUser = getCurrentUser();
+    const allTasks = await getAllTasks();
+    const tasks = filterTasksForExport(allTasks, filters);
 
-  const wb = window.XLSX.utils.book_new();
-  window.XLSX.utils.book_append_sheet(wb, buildMasterAllTasksSheet(tasks), 'All Tasks');
-  window.XLSX.utils.book_append_sheet(wb, buildSummarySheet(tasks), 'Summary');
-  if (includeAuditLog) {
-    window.XLSX.utils.book_append_sheet(wb, await buildAuditLogSheet(), 'Audit Log');
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, buildMasterAllTasksSheet(tasks), 'All Tasks');
+    window.XLSX.utils.book_append_sheet(wb, buildSummarySheet(tasks), 'Summary');
+    if (includeAuditLog) {
+      window.XLSX.utils.book_append_sheet(wb, await buildAuditLogSheet(), 'Audit Log');
+    }
+
+    const filename = `project_tracker_export_${formatDateISO(new Date())}.xlsx`;
+    window.XLSX.writeFile(wb, filename, { cellStyles: true });
+
+    await writeAuditLog({ user_id: currentUser.id, action: 'export_created' });
+    showToast(`Exported ${tasks.length} task${tasks.length === 1 ? '' : 's'} to Excel.`, 'success');
+  } catch (err) {
+    showToast('Could not export to Excel. Please try again.', 'error');
   }
-
-  const filename = `project_tracker_export_${formatDateISO(new Date())}.xlsx`;
-  window.XLSX.writeFile(wb, filename, { cellStyles: true });
-
-  await writeAuditLog({ user_id: currentUser.id, action: 'export_created' });
-  showToast(`Exported ${tasks.length} task${tasks.length === 1 ? '' : 's'} to Excel.`, 'success');
 }
 
 function openMasterExportModal(filters) {
   const root = document.createElement('div');
   document.body.appendChild(root);
 
-  const escHandler = (e) => { if (e.key === 'Escape') close(); };
   const close = () => {
     root.remove();
     document.removeEventListener('keydown', escHandler);
@@ -362,7 +383,7 @@ function openMasterExportModal(filters) {
       <div class="card modal" id="export-modal-card">
         <div class="modal-header">
           <h2>Export to Excel</h2>
-          <button class="icon-btn" id="export-modal-close">${iconSvg('close', 16)}</button>
+          <button class="icon-btn" id="export-modal-close" aria-label="Close modal">${iconSvg('close', 16)}</button>
         </div>
         <div class="modal-body">
           <p style="font-size:13px;color:var(--ink-2);margin:0 0 14px">"All Tasks" and "Summary" sheets are always included, using the filters currently applied.</p>
@@ -378,14 +399,22 @@ function openMasterExportModal(filters) {
       </div>
     </div>`;
 
+  const modalCard = document.getElementById('export-modal-card');
+  const formSnapshot = captureFormSnapshot(modalCard);
+  const escHandler = createModalEscapeHandler(() => document.getElementById('export-modal-card'), () => formSnapshot, close);
+
+  autofocusFirstField(modalCard);
+
   document.getElementById('export-modal-backdrop').addEventListener('click', (e) => { if (e.target.id === 'export-modal-backdrop') close(); });
   document.getElementById('export-modal-close').addEventListener('click', close);
   document.getElementById('export-modal-cancel').addEventListener('click', close);
-  document.getElementById('export-modal-confirm').addEventListener('click', async () => {
+  document.getElementById('export-modal-confirm').addEventListener('click', async (e) => {
     const includeAuditLog = document.getElementById('export-include-audit').checked;
-    close();
+    setButtonLoading(e.currentTarget, true, 'Exporting…');
     await runMasterExcelExport(filters, includeAuditLog);
+    close();
   });
+  enableEnterToSubmit(modalCard, document.getElementById('export-modal-confirm'));
   document.addEventListener('keydown', escHandler);
 }
 

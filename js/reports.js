@@ -606,24 +606,30 @@ async function renderReports() {
   if (!user || !MASTER_ROLES.includes(user.role)) return;
 
   const isPM = user.role === 'project_manager';
-  reportsCache = await getAllTasks();
-
-  const coordinators = distinctReportValues('coordinator_name');
-  const vendors = distinctReportValues('vendor');
-
   const container = document.getElementById('page-content');
-  container.innerHTML = `
-    <div class="fade-in reports-page">
-      ${reportsHeaderHtml(reportsCache.length)}
-      ${reportsFiltersBarHtml(isPM, coordinators, vendors)}
-      <div id="reports-body"></div>
-    </div>`;
+  container.innerHTML = `<div class="fade-in reports-page">${tableSkeletonHtml(5)}</div>`;
 
-  document.getElementById('reports-export-btn').addEventListener('click', triggerReportsExport);
-  document.getElementById('rpt-apply-btn').addEventListener('click', () => refreshReportsBody(isPM));
-  document.getElementById('rpt-reset-btn').addEventListener('click', () => resetReportFilters(isPM));
+  try {
+    reportsCache = await getAllTasks();
 
-  refreshReportsBody(isPM);
+    const coordinators = distinctReportValues('coordinator_name');
+    const vendors = distinctReportValues('vendor');
+
+    container.innerHTML = `
+      <div class="fade-in reports-page">
+        ${reportsHeaderHtml(reportsCache.length)}
+        ${reportsFiltersBarHtml(isPM, coordinators, vendors)}
+        <div id="reports-body"></div>
+      </div>`;
+
+    document.getElementById('reports-export-btn').addEventListener('click', triggerReportsExport);
+    document.getElementById('rpt-apply-btn').addEventListener('click', () => refreshReportsBody(isPM));
+    document.getElementById('rpt-reset-btn').addEventListener('click', () => resetReportFilters(isPM));
+
+    refreshReportsBody(isPM);
+  } catch (err) {
+    showToast('Could not load reports. Please reload the page.', 'error');
+  }
 }
 
 window.renderReports = renderReports;

@@ -257,15 +257,21 @@ function renderTasks() {
 }
 
 async function renderCoordinatorTaskList() {
-  const user = getCurrentUser();
-  taskListCache = await getMyTasks(user.id);
-  await loadUsersByIdCache();
-  taskListState.page = 1;
-
   const container = document.getElementById('page-content');
-  container.innerHTML = coordinatorListShellHtml();
-  attachTaskListShellEvents();
-  renderTaskTableSection();
+  container.innerHTML = `<div class="fade-in tasks-page">${tableSkeletonHtml(5)}</div>`;
+
+  try {
+    const user = getCurrentUser();
+    taskListCache = await getMyTasks(user.id);
+    await loadUsersByIdCache();
+    taskListState.page = 1;
+
+    container.innerHTML = coordinatorListShellHtml();
+    attachTaskListShellEvents();
+    renderTaskTableSection();
+  } catch (err) {
+    showToast('Could not load your tasks. Please reload the page.', 'error');
+  }
 }
 
 function distinctVendors() {
@@ -370,11 +376,11 @@ function taskRowHtml(t) {
     : `<span style="color:var(--ink-3)">—</span>`;
   const actionsHtml = t.is_locked
     ? `<span class="lock-icon" title="${escapeHtml(lockTooltipText(t))}">${iconSvg('lock', 13)}</span>`
-    : `<button class="icon-btn sm-icon-btn" data-action="edit" data-id="${t.id}" title="Edit">${iconSvg('edit', 14)}</button>
-       <button class="icon-btn sm-icon-btn" data-action="delete" data-id="${t.id}" title="Delete">${iconSvg('trash', 14)}</button>`;
+    : `<button class="icon-btn sm-icon-btn" data-action="edit" data-id="${t.id}" title="Edit" aria-label="Edit">${iconSvg('edit', 14)}</button>
+       <button class="icon-btn sm-icon-btn" data-action="delete" data-id="${t.id}" title="Delete" aria-label="Delete">${iconSvg('trash', 14)}</button>`;
 
   return `
-    <tr class="data-row${lockedClass}">
+    <tr class="data-row${lockedClass}" data-id="${escapeHtml(t.id)}">
       <td class="mono">${escapeHtml(t.id)}</td>
       <td class="mono">${escapeHtml(t.physical_site_id || '')}</td>
       <td class="mono">${escapeHtml(t.job_code || '')}</td>
@@ -438,9 +444,9 @@ function renderTaskTableSection() {
     <div class="tasks-pagination">
       <span class="tasks-pagination-info">Showing ${start + 1}–${Math.min(start + TASKS_PAGE_SIZE, rows.length)} of ${rows.length}</span>
       <div class="tasks-pagination-controls">
-        <button class="icon-btn" id="page-prev-btn" ${taskListState.page <= 1 ? 'disabled' : ''}>${iconSvg('chevLeft', 16)}</button>
+        <button class="icon-btn" id="page-prev-btn" aria-label="Previous page" ${taskListState.page <= 1 ? 'disabled' : ''}>${iconSvg('chevLeft', 16)}</button>
         <span class="tasks-pagination-page">Page ${taskListState.page} of ${totalPages}</span>
-        <button class="icon-btn" id="page-next-btn" ${taskListState.page >= totalPages ? 'disabled' : ''}>${iconSvg('chevRight', 16)}</button>
+        <button class="icon-btn" id="page-next-btn" aria-label="Next page" ${taskListState.page >= totalPages ? 'disabled' : ''}>${iconSvg('chevRight', 16)}</button>
       </div>
     </div>`;
 
@@ -508,22 +514,35 @@ function attachTaskRowEvents() {
   if (!section) return;
 
   section.querySelectorAll('[data-action="edit"]').forEach(btn => {
-    btn.addEventListener('click', () => showTaskForm(btn.dataset.id));
+    btn.addEventListener('click', (e) => { e.stopPropagation(); showTaskForm(btn.dataset.id); });
   });
   section.querySelectorAll('[data-action="delete"]').forEach(btn => {
-    btn.addEventListener('click', () => handleDeleteTask(btn.dataset.id));
+    btn.addEventListener('click', (e) => { e.stopPropagation(); handleDeleteTask(btn.dataset.id); });
+  });
+  section.querySelectorAll('tr.data-row').forEach(row => {
+    row.addEventListener('click', () => showTaskForm(row.dataset.id));
   });
 }
 
 async function handleDeleteTask(id) {
   if (!window.confirm('Delete this task? It can be recovered within 10 days.')) return;
 
-  const result = await softDeleteTask(id);
-  if (result && result.error) {
-    window.alert(result.error);
-    return;
+  const btn = document.querySelector(`[data-action="delete"][data-id="${id}"]`);
+  if (btn) setButtonLoading(btn, true);
+
+  try {
+    const result = await softDeleteTask(id);
+    if (result && result.error) {
+      showToast(result.error, 'error');
+      return;
+    }
+    showToast('Task deleted.', 'success');
+    await renderCoordinatorTaskList();
+  } catch (err) {
+    showToast('Could not delete task. Please try again.', 'error');
+  } finally {
+    if (btn) setButtonLoading(btn, false);
   }
-  await renderCoordinatorTaskList();
 }
 
 /* ==========================================================================
@@ -618,11 +637,16 @@ let masterTableState = {
   search: '', status: '', region: '', vendor: '', coordinator: '', acceptanceStatus: '', txrf: '',
   quickFilter: '',
   sortField: 'done_date', sortDir: 'desc',
-  visibleCount: TASKS_PAGE_SIZE,
+  rows: [],
+  visibleCols: [],
   selectedIds: new Set(),
   visibleColumns: {},
   columnsMenuOpen: false
 };
+
+const MASTER_ROW_HEIGHT = 46;
+const MASTER_SCROLL_BUFFER = 10;
+let masterScrollRAF = null;
 
 function coordinatorBadgeColor(name) {
   if (!name) return '#64748b';
@@ -658,16 +682,21 @@ async function saveMasterColumnVisibility(visibility) {
 }
 
 async function renderMasterTaskList() {
-  masterTaskCache = await getAllTasks();
-  await loadUsersByIdCache();
-  masterTableState.visibleCount = TASKS_PAGE_SIZE;
-  masterTableState.selectedIds = new Set();
-  masterTableState.visibleColumns = await loadMasterColumnVisibility();
-
   const container = document.getElementById('page-content');
-  container.innerHTML = masterListShellHtml();
-  attachMasterListShellEvents();
-  renderMasterTableSection();
+  container.innerHTML = `<div class="fade-in tasks-page">${tableSkeletonHtml(5)}</div>`;
+
+  try {
+    masterTaskCache = await getAllTasks();
+    await loadUsersByIdCache();
+    masterTableState.selectedIds = new Set();
+    masterTableState.visibleColumns = await loadMasterColumnVisibility();
+
+    container.innerHTML = masterListShellHtml();
+    attachMasterListShellEvents();
+    renderMasterTableSection();
+  } catch (err) {
+    showToast('Could not load tasks. Please reload the page.', 'error');
+  }
 }
 
 function distinctMasterValues(field) {
@@ -767,7 +796,6 @@ function attachMasterListShellEvents() {
     const value = e.target.value;
     searchTimer = setTimeout(() => {
       masterTableState.search = value;
-      masterTableState.visibleCount = TASKS_PAGE_SIZE;
       renderMasterTableSection();
     }, 300);
   });
@@ -784,7 +812,6 @@ function attachMasterListShellEvents() {
   Object.keys(filterMap).forEach(id => {
     document.getElementById(id).addEventListener('change', (e) => {
       masterTableState[filterMap[id]] = e.target.value;
-      masterTableState.visibleCount = TASKS_PAGE_SIZE;
       renderMasterTableSection();
     });
   });
@@ -815,8 +842,12 @@ function toggleMasterColumnsMenu() {
     menu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
       cb.addEventListener('change', async (e) => {
         masterTableState.visibleColumns[e.target.dataset.col] = e.target.checked;
-        await saveMasterColumnVisibility(masterTableState.visibleColumns);
-        renderMasterTableSection();
+        try {
+          await saveMasterColumnVisibility(masterTableState.visibleColumns);
+          renderMasterTableSection();
+        } catch (err) {
+          showToast('Could not save column preferences.', 'error');
+        }
       });
     });
   } else {
@@ -890,6 +921,14 @@ function masterCellDisplayValue(task, col) {
     const color = coordinatorBadgeColor(task.coordinator_name);
     return `<span class="id-coord-bar" style="background:${color}"></span><span class="mono">${escapeHtml(value)}</span>`;
   }
+  if (col.key === 'contractor') {
+    const missingPrice = task.price_snapshot === null || task.price_snapshot === undefined;
+    const warnIcon = missingPrice
+      ? `<span style="color:var(--amber);margin-left:5px;display:inline-flex;vertical-align:middle" title="Missing price">${iconSvg('warn', 12)}</span>`
+      : '';
+    if (value === null || value === undefined || value === '') return `<span style="color:var(--ink-3)">—</span>${warnIcon}`;
+    return `${escapeHtml(String(value))}${warnIcon}`;
+  }
   if (col.type === 'badge') {
     return statusBadgeHtml(value);
   }
@@ -924,7 +963,7 @@ function masterTableHeadHtml(visibleCols) {
   return `
     <tr>
       <th style="width:56px">
-        <span class="row-checkbox${allChecked ? ' checked' : ''}" id="master-select-all">${allChecked ? iconSvg('check', 11) : ''}</span>
+        <span class="row-checkbox${allChecked ? ' checked' : ''}" id="master-select-all" role="checkbox" aria-checked="${allChecked}" aria-label="Select all tasks" tabindex="0">${allChecked ? iconSvg('check', 11) : ''}</span>
       </th>
       ${ths}
     </tr>`;
@@ -945,7 +984,7 @@ function masterRowHtml(task, visibleCols) {
   return `
     <tr class="data-row${lockedClass}${selectedClass}" data-id="${escapeHtml(task.id)}">
       <td class="master-checkbox-cell">
-        <span class="row-checkbox${selected ? ' checked' : ''}" data-action="select-row" data-id="${escapeHtml(task.id)}">${selected ? iconSvg('check', 11) : ''}</span>
+        <span class="row-checkbox${selected ? ' checked' : ''}" data-action="select-row" data-id="${escapeHtml(task.id)}" role="checkbox" aria-checked="${selected}" aria-label="Select task ${escapeHtml(task.id)}" tabindex="0">${selected ? iconSvg('check', 11) : ''}</span>
         ${masterLockButtonHtml(task)}
       </td>
       ${cells}
@@ -954,17 +993,22 @@ function masterRowHtml(task, visibleCols) {
 
 function masterLockButtonHtml(task) {
   if (task.is_locked) {
-    return `<span class="lock-icon lock-action" data-action="unlock-task" data-id="${escapeHtml(task.id)}" title="${escapeHtml(lockTooltipText(task))}">${iconSvg('lock', 13)}</span>`;
+    return `<span class="lock-icon lock-action" data-action="unlock-task" data-id="${escapeHtml(task.id)}" title="${escapeHtml(lockTooltipText(task))}" aria-label="${escapeHtml(lockTooltipText(task))}" role="button" tabindex="0">${iconSvg('lock', 13)}</span>`;
   }
-  return `<span class="lock-icon lock-action" data-action="lock-task" data-id="${escapeHtml(task.id)}" title="Lock task">${iconSvg('unlock', 13)}</span>`;
+  return `<span class="lock-icon lock-action" data-action="lock-task" data-id="${escapeHtml(task.id)}" title="Lock task" aria-label="Lock task" role="button" tabindex="0">${iconSvg('unlock', 13)}</span>`;
 }
 
 function renderMasterTableSection() {
   const section = document.getElementById('master-table-section');
   if (!section) return;
 
+  const existingWrap = document.getElementById('master-table-wrap');
+  const preservedScrollTop = existingWrap ? existingWrap.scrollTop : 0;
+
   const rows = getFilteredSortedMasterTasks();
+  masterTableState.rows = rows;
   const visibleCols = getVisibleColumnsList();
+  masterTableState.visibleCols = visibleCols;
 
   if (rows.length === 0) {
     section.innerHTML = `
@@ -979,50 +1023,77 @@ function renderMasterTableSection() {
     return;
   }
 
-  const pageRows = rows.slice(0, masterTableState.visibleCount);
-
   section.innerHTML = `
     <div class="card tasks-table-wrap master-table-wrap" id="master-table-wrap">
       <table class="data-table master-table">
         <thead id="master-thead">${masterTableHeadHtml(visibleCols)}</thead>
-        <tbody id="master-tbody">
-          ${pageRows.map(t => masterRowHtml(t, visibleCols)).join('')}
-        </tbody>
+        <tbody id="master-tbody"></tbody>
       </table>
     </div>
     <div id="master-bulk-bar-root"></div>`;
 
-  attachMasterTableEvents(visibleCols);
+  attachMasterTableEvents();
   renderMasterBulkBar();
 
-  document.getElementById('master-table-wrap').addEventListener('scroll', handleMasterTableScroll);
-}
-
-function handleMasterTableScroll(e) {
-  const wrap = e.target;
-  if (wrap.scrollTop + wrap.clientHeight < wrap.scrollHeight - 120) return;
-
-  const rows = getFilteredSortedMasterTasks();
-  if (masterTableState.visibleCount >= rows.length) return;
-
-  const visibleCols = getVisibleColumnsList();
-  const nextRows = rows.slice(masterTableState.visibleCount, masterTableState.visibleCount + TASKS_PAGE_SIZE);
-  masterTableState.visibleCount += TASKS_PAGE_SIZE;
-
-  const tbody = document.getElementById('master-tbody');
-  if (tbody) {
-    tbody.insertAdjacentHTML('beforeend', nextRows.map(t => masterRowHtml(t, visibleCols)).join(''));
-    attachMasterRowEvents(visibleCols);
+  const wrap = document.getElementById('master-table-wrap');
+  if (wrap) {
+    const maxScrollTop = Math.max(0, rows.length * MASTER_ROW_HEIGHT - wrap.clientHeight);
+    wrap.scrollTop = Math.min(preservedScrollTop, maxScrollTop);
   }
+  renderMasterVisibleRows();
 }
 
-function attachMasterTableEvents(visibleCols) {
-  attachMasterRowEvents(visibleCols);
+// True virtual scroll: only rows within the viewport (+ a 10-row buffer
+// above/below) ever exist in the DOM. Spacer rows keep the scrollbar height
+// correct so the table feels like all rows are rendered.
+function renderMasterVisibleRows() {
+  const wrap = document.getElementById('master-table-wrap');
+  const tbody = document.getElementById('master-tbody');
+  if (!wrap || !tbody) return;
+
+  const rows = masterTableState.rows;
+  const visibleCols = masterTableState.visibleCols;
+  const total = rows.length;
+
+  const scrollTop = wrap.scrollTop;
+  const viewportHeight = wrap.clientHeight || 600;
+
+  const firstVisible = Math.floor(scrollTop / MASTER_ROW_HEIGHT);
+  const lastVisible = Math.ceil((scrollTop + viewportHeight) / MASTER_ROW_HEIGHT);
+
+  const start = Math.max(0, firstVisible - MASTER_SCROLL_BUFFER);
+  const end = Math.min(total, lastVisible + MASTER_SCROLL_BUFFER);
+
+  const colSpan = visibleCols.length + 1;
+  const topHeight = start * MASTER_ROW_HEIGHT;
+  const bottomHeight = (total - end) * MASTER_ROW_HEIGHT;
+
+  const topSpacer = topHeight > 0 ? `<tr class="virtual-spacer-row" style="height:${topHeight}px"><td colspan="${colSpan}"></td></tr>` : '';
+  const bottomSpacer = bottomHeight > 0 ? `<tr class="virtual-spacer-row" style="height:${bottomHeight}px"><td colspan="${colSpan}"></td></tr>` : '';
+
+  tbody.innerHTML = topSpacer + rows.slice(start, end).map(t => masterRowHtml(t, visibleCols)).join('') + bottomSpacer;
+}
+
+function handleMasterTableScroll() {
+  if (masterScrollRAF) return;
+  masterScrollRAF = requestAnimationFrame(() => {
+    masterScrollRAF = null;
+    renderMasterVisibleRows();
+  });
+}
+
+function attachMasterTableEvents() {
+  const wrap = document.getElementById('master-table-wrap');
+  if (wrap) {
+    wrap.addEventListener('scroll', handleMasterTableScroll);
+    wrap.addEventListener('click', handleMasterTableClick);
+    wrap.addEventListener('keydown', handleMasterTableKeydown);
+  }
 
   const selectAll = document.getElementById('master-select-all');
   if (selectAll) {
     selectAll.addEventListener('click', () => {
-      const rows = getFilteredSortedMasterTasks();
+      const rows = masterTableState.rows;
       const allChecked = rows.length > 0 && rows.every(t => masterTableState.selectedIds.has(t.id));
       if (allChecked) {
         rows.forEach(t => masterTableState.selectedIds.delete(t.id));
@@ -1030,6 +1101,9 @@ function attachMasterTableEvents(visibleCols) {
         rows.forEach(t => masterTableState.selectedIds.add(t.id));
       }
       renderMasterTableSection();
+    });
+    selectAll.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectAll.click(); }
     });
   }
 
@@ -1047,46 +1121,63 @@ function attachMasterTableEvents(visibleCols) {
   });
 }
 
-function attachMasterRowEvents() {
-  document.querySelectorAll('[data-action="select-row"]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const id = el.dataset.id;
-      if (masterTableState.selectedIds.has(id)) {
-        masterTableState.selectedIds.delete(id);
-      } else {
-        masterTableState.selectedIds.add(id);
-      }
-      renderMasterTableSection();
-    });
-  });
+// Delegated click handler bound once on the scroll container (#master-table-wrap),
+// so it keeps working across virtual-scroll re-renders without rebinding per row.
+function handleMasterTableClick(e) {
+  const selectEl = e.target.closest('[data-action="select-row"]');
+  if (selectEl) {
+    e.stopPropagation();
+    const id = selectEl.dataset.id;
+    if (masterTableState.selectedIds.has(id)) {
+      masterTableState.selectedIds.delete(id);
+    } else {
+      masterTableState.selectedIds.add(id);
+    }
+    renderMasterTableSection();
+    return;
+  }
 
-  document.querySelectorAll('[data-pm-cell]').forEach(cell => {
-    cell.addEventListener('click', () => startInlinePmEdit(cell));
-  });
+  const lockBtn = e.target.closest('[data-action="lock-task"]');
+  if (lockBtn) { e.stopPropagation(); handleLockTaskClick(lockBtn.dataset.id); return; }
 
-  document.querySelectorAll('[data-action="lock-task"]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      handleLockTaskClick(btn.dataset.id);
-    });
-  });
+  const unlockBtn = e.target.closest('[data-action="unlock-task"]');
+  if (unlockBtn) { e.stopPropagation(); handleUnlockTaskClick(unlockBtn.dataset.id); return; }
 
-  document.querySelectorAll('[data-action="unlock-task"]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      handleUnlockTaskClick(btn.dataset.id);
-    });
-  });
+  const pmCell = e.target.closest('[data-pm-cell]');
+  if (pmCell) { startInlinePmEdit(pmCell); return; }
+
+  const row = e.target.closest('tr.data-row');
+  if (row && row.dataset.id) { showTaskForm(row.dataset.id); }
+}
+
+// Enter/Space activates the focused custom checkbox/lock control by
+// re-dispatching a real click, which the delegated click handler above
+// already knows how to handle.
+function handleMasterTableKeydown(e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const interactive = e.target.closest('[data-action="select-row"], [data-action="lock-task"], [data-action="unlock-task"]');
+  if (interactive) {
+    e.preventDefault();
+    interactive.click();
+  }
 }
 
 async function handleLockTaskClick(id) {
   if (!window.confirm('Lock this task? Coordinators will no longer be able to edit it.')) return;
 
-  await lockTask(id, 'Manual lock by PM/AM/CCM');
-  showToast('Task locked.', 'success');
-  masterTaskCache = await getAllTasks();
-  renderMasterTableSection();
+  const btn = document.querySelector(`[data-action="lock-task"][data-id="${id}"]`);
+  if (btn) setButtonLoading(btn, true);
+
+  try {
+    await lockTask(id, 'Manual lock by PM/AM/CCM');
+    showToast('Task locked.', 'success');
+    masterTaskCache = await getAllTasks();
+    renderMasterTableSection();
+  } catch (err) {
+    showToast('Could not lock task. Please try again.', 'error');
+  } finally {
+    if (btn) setButtonLoading(btn, false);
+  }
 }
 
 function handleUnlockTaskClick(id) {
@@ -1097,18 +1188,19 @@ function openUnlockReasonModal(id) {
   const root = document.createElement('div');
   document.body.appendChild(root);
 
-  const escHandler = (e) => { if (e.key === 'Escape') close(); };
   const close = () => {
     root.remove();
     document.removeEventListener('keydown', escHandler);
   };
+  const formSnapshot = () => captureFormSnapshot(document.getElementById('unlock-modal-card'));
+  const escHandler = createModalEscapeHandler(() => document.getElementById('unlock-modal-card'), formSnapshot, close);
 
   root.innerHTML = `
     <div class="modal-backdrop scale-in" id="unlock-modal-backdrop">
       <div class="card modal" id="unlock-modal-card">
         <div class="modal-header">
           <h2>Unlock Task</h2>
-          <button class="icon-btn" id="unlock-modal-close">${iconSvg('close', 16)}</button>
+          <button class="icon-btn" id="unlock-modal-close" aria-label="Close modal">${iconSvg('close', 16)}</button>
         </div>
         <div class="modal-body">
           <label class="field" for="unlock-reason-input">
@@ -1123,6 +1215,8 @@ function openUnlockReasonModal(id) {
         </div>
       </div>
     </div>`;
+
+  autofocusFirstField(document.getElementById('unlock-modal-card'));
 
   document.getElementById('unlock-modal-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'unlock-modal-backdrop') close();
@@ -1140,17 +1234,25 @@ function openUnlockReasonModal(id) {
       return;
     }
 
-    const result = await unlockTask(id, reason);
-    close();
+    const confirmBtn = document.getElementById('unlock-modal-confirm');
+    setButtonLoading(confirmBtn, true);
 
-    if (result && result.error) {
-      showToast(result.error, 'error');
-      return;
+    try {
+      const result = await unlockTask(id, reason);
+      if (result && result.error) {
+        close();
+        showToast(result.error, 'error');
+        return;
+      }
+
+      close();
+      showToast('Task unlocked', 'success');
+      masterTaskCache = await getAllTasks();
+      renderMasterTableSection();
+    } catch (err) {
+      setButtonLoading(confirmBtn, false);
+      showToast('Could not unlock task. Please try again.', 'error');
     }
-
-    showToast('Task unlocked', 'success');
-    masterTaskCache = await getAllTasks();
-    renderMasterTableSection();
   });
   document.addEventListener('keydown', escHandler);
 }
@@ -1213,19 +1315,25 @@ function startInlinePmEdit(cell) {
     const changes = { [field]: newValue };
     if (meta.overrideKey) changes[meta.overrideKey] = true;
 
-    const result = await updateTask(id, changes);
-    if (result && result.error) {
-      showToast(result.error, 'error');
+    try {
+      const result = await updateTask(id, changes);
+      if (result && result.error) {
+        showToast(result.error, 'error');
+        cell.classList.remove('editing');
+        cell.innerHTML = originalHtml;
+        return;
+      }
+
+      const idx = masterTaskCache.findIndex(t => t.id === id);
+      if (idx !== -1) masterTaskCache[idx] = result;
+      cell.classList.remove('editing');
+      cell.innerHTML = masterCellDisplayValue(result, meta);
+      showToast('Saved.', 'success', 1400);
+    } catch (err) {
+      showToast('Could not save change. Please try again.', 'error');
       cell.classList.remove('editing');
       cell.innerHTML = originalHtml;
-      return;
     }
-
-    const idx = masterTaskCache.findIndex(t => t.id === id);
-    if (idx !== -1) masterTaskCache[idx] = result;
-    cell.classList.remove('editing');
-    cell.innerHTML = masterCellDisplayValue(result, meta);
-    showToast('Saved.', 'success', 1400);
   };
 
   input.addEventListener('keydown', (e) => {
@@ -1260,7 +1368,7 @@ function renderMasterBulkBar() {
       <button class="master-bulk-btn" data-bulk="po_status">Set PO Status</button>
       <button class="master-bulk-btn" data-bulk="vf_invoice_no">Set VF Invoice #</button>
       <button class="master-bulk-btn" data-bulk="lock">Lock selected</button>
-      <button class="master-bulk-btn master-bulk-close" data-bulk="clear" title="Clear selection">${iconSvg('close', 13)}</button>
+      <button class="master-bulk-btn master-bulk-close" data-bulk="clear" title="Clear selection" aria-label="Clear selection">${iconSvg('close', 13)}</button>
     </div>
     <div id="bulk-modal-root"></div>`;
 
@@ -1309,7 +1417,7 @@ function openBulkFieldModal(action) {
       <div class="card modal" id="bulk-modal-card">
         <div class="modal-header">
           <h2>${config.title}</h2>
-          <button class="icon-btn" id="bulk-modal-close">${iconSvg('close', 16)}</button>
+          <button class="icon-btn" id="bulk-modal-close" aria-label="Close modal">${iconSvg('close', 16)}</button>
         </div>
         <div class="modal-body">
           <label class="field" for="bulk-field-input">
@@ -1324,11 +1432,15 @@ function openBulkFieldModal(action) {
       </div>
     </div>`;
 
-  const escHandler = (e) => { if (e.key === 'Escape') close(); };
   const close = () => {
     root.innerHTML = '';
     document.removeEventListener('keydown', escHandler);
   };
+  const modalCard = document.getElementById('bulk-modal-card');
+  const formSnapshot = captureFormSnapshot(modalCard);
+  const escHandler = createModalEscapeHandler(() => document.getElementById('bulk-modal-card'), () => formSnapshot, close);
+
+  autofocusFirstField(modalCard);
 
   document.getElementById('bulk-modal-backdrop').addEventListener('click', (e) => { if (e.target.id === 'bulk-modal-backdrop') close(); });
   document.getElementById('bulk-modal-close').addEventListener('click', close);
@@ -1336,9 +1448,17 @@ function openBulkFieldModal(action) {
   document.getElementById('bulk-modal-apply').addEventListener('click', async () => {
     const value = document.getElementById('bulk-field-input').value;
     if (!value) { showToast(`${config.label} is required.`, 'error'); return; }
-    await applyBulkFieldUpdate(action, value);
-    close();
+    const applyBtn = document.getElementById('bulk-modal-apply');
+    setButtonLoading(applyBtn, true);
+    try {
+      await applyBulkFieldUpdate(action, value);
+      close();
+    } catch (err) {
+      setButtonLoading(applyBtn, false);
+      showToast('Could not apply the change to the selected tasks. Please try again.', 'error');
+    }
   });
+  enableEnterToSubmit(modalCard, document.getElementById('bulk-modal-apply'));
   document.addEventListener('keydown', escHandler);
 }
 
@@ -1377,14 +1497,18 @@ async function handleBulkLock() {
 
   if (!window.confirm(`Lock ${toLock.length} task${toLock.length === 1 ? '' : 's'}?`)) return;
 
-  for (const id of toLock) {
-    await lockTask(id, 'Bulk locked from master table');
-  }
+  try {
+    for (const id of toLock) {
+      await lockTask(id, 'Bulk locked from master table');
+    }
 
-  showToast(`${toLock.length} task${toLock.length === 1 ? '' : 's'} locked.`, 'success');
-  masterTableState.selectedIds = new Set();
-  masterTaskCache = await getAllTasks();
-  renderMasterTableSection();
+    showToast(`${toLock.length} task${toLock.length === 1 ? '' : 's'} locked.`, 'success');
+    masterTableState.selectedIds = new Set();
+    masterTaskCache = await getAllTasks();
+    renderMasterTableSection();
+  } catch (err) {
+    showToast('Could not lock the selected tasks. Please try again.', 'error');
+  }
 }
 
 /* ==========================================================================
@@ -1450,7 +1574,7 @@ function autoCalcFieldHtml(key, label, value, overridden, required, disabled) {
       <span class="lbl">${escapeHtml(label)}${required ? '<span class="req">*</span>' : ''}</span>
       <div class="auto-calc-wrap">
         <input id="field-${key}" name="${key}" type="number" step="0.01" class="input num mono" value="${value === null || value === undefined ? '' : value}" ${disabled ? 'disabled' : ''}>
-        <span class="auto-calc-icon${overridden && !disabled ? ' clickable' : ''}" id="autocalc-${key}" title="${overridden ? 'Manually set. Click to recalculate.' : 'Auto-calculated'}">
+        <span class="auto-calc-icon${overridden && !disabled ? ' clickable' : ''}" id="autocalc-${key}" title="${overridden ? 'Manually set. Click to recalculate.' : 'Auto-calculated'}" aria-label="${overridden ? 'Manually set. Click to recalculate.' : 'Auto-calculated'}">
           ${overridden ? iconSvg('edit', 13) : iconSvg('calc', 13)}
         </span>
       </div>
@@ -1568,6 +1692,7 @@ function renderTaskForm(task, lineItems, streams, noCatalog, noStreamList) {
     document.getElementById('task-form').addEventListener('submit', (e) => handleTaskFormSubmit(e, task ? task.id : null));
     document.getElementById('field-job_code').addEventListener('blur', () => validateJobCodeOnBlur(task ? task.id : null));
     wireCalcEngine(overridden, () => isFrozen, (val) => { isFrozen = val; });
+    autofocusFirstField(document.getElementById('task-form'));
   }
 }
 
@@ -1597,6 +1722,7 @@ function setOverrideUI(overridden, key, isOverridden) {
   if (!iconEl) return;
   iconEl.innerHTML = isOverridden ? iconSvg('edit', 13) : iconSvg('calc', 13);
   iconEl.title = isOverridden ? 'Manually set. Click to recalculate.' : 'Auto-calculated';
+  iconEl.setAttribute('aria-label', isOverridden ? 'Manually set. Click to recalculate.' : 'Auto-calculated');
   iconEl.classList.toggle('clickable', isOverridden);
 }
 
@@ -1642,19 +1768,27 @@ async function recalcPrice(overridden) {
   const lineItemCode = getRawField('line_item_code');
   if (!lineItemCode) return;
 
-  const result = await getPriceForDate(lineItemCode, getRawField('done_date') || null);
-  setFieldValue('new_price', result.price);
-  setFieldValue('catalog_year', result.catalogYear ?? '');
-  showCalcWarnings([result.warning]);
-  await recalcTotal(overridden);
+  try {
+    const result = await getPriceForDate(lineItemCode, getRawField('done_date') || null);
+    setFieldValue('new_price', result.price);
+    setFieldValue('catalog_year', result.catalogYear ?? '');
+    showCalcWarnings([result.warning]);
+    await recalcTotal(overridden);
+  } catch (err) {
+    showToast('Could not look up the catalog price. Please re-check before saving.', 'error');
+  }
 }
 
 async function recalcQuantity(overridden) {
   if (overridden.actual_quantity) return;
-  const absoluteQty = getNumField('absolute_quantity') || 0;
-  const multiplier = await getDistanceMultiplier(getRawField('distance'));
-  setFieldValue('actual_quantity', round2(absoluteQty * multiplier));
-  await recalcTotal(overridden);
+  try {
+    const absoluteQty = getNumField('absolute_quantity') || 0;
+    const multiplier = await getDistanceMultiplier(getRawField('distance'));
+    setFieldValue('actual_quantity', round2(absoluteQty * multiplier));
+    await recalcTotal(overridden);
+  } catch (err) {
+    showToast('Could not calculate actual quantity. Please re-check before saving.', 'error');
+  }
 }
 
 async function recalcTotal(overridden) {
@@ -1669,33 +1803,42 @@ async function recalcPortions(overridden) {
   const contractor = getRawField('contractor');
   if (!contractor) return;
 
-  const result = await getPortionForDate(contractor, getRawField('done_date') || null);
-  if (result.warning) {
-    showCalcWarnings([result.warning]);
-    return;
+  try {
+    const result = await getPortionForDate(contractor, getRawField('done_date') || null);
+    if (result.warning) {
+      showCalcWarnings([result.warning]);
+      return;
+    }
+
+    setFieldValue('portion_rule_id', result.ruleId ?? '');
+    const total = getNumField('new_total_price');
+    if (total === null) return;
+
+    if (!overridden.lmp_portion) setFieldValue('lmp_portion', round2(total * (result.lmpPct / 100)));
+    if (!overridden.contractor_portion) setFieldValue('contractor_portion', round2(total * (result.contractorPct / 100)));
+  } catch (err) {
+    showToast('Could not calculate contractor portions. Please re-check before saving.', 'error');
   }
-
-  setFieldValue('portion_rule_id', result.ruleId ?? '');
-  const total = getNumField('new_total_price');
-  if (total === null) return;
-
-  if (!overridden.lmp_portion) setFieldValue('lmp_portion', round2(total * (result.lmpPct / 100)));
-  if (!overridden.contractor_portion) setFieldValue('contractor_portion', round2(total * (result.contractorPct / 100)));
 }
 
 async function recalcDoneDateChain(overridden) {
   const snapshot = buildCalcSnapshot(overridden);
-  const result = await calculateTaskFinancials(snapshot);
 
-  if (!overridden.new_price) setFieldValue('new_price', result.price_snapshot);
-  if (!overridden.actual_quantity) setFieldValue('actual_quantity', result.actual_quantity);
-  if (!overridden.new_total_price) setFieldValue('new_total_price', result.new_total_price);
-  if (!overridden.lmp_portion) setFieldValue('lmp_portion', result.lmp_portion);
-  if (!overridden.contractor_portion) setFieldValue('contractor_portion', result.contractor_portion);
-  setFieldValue('catalog_year', result.catalog_year ?? '');
-  setFieldValue('portion_rule_id', result.portion_rule_id ?? '');
+  try {
+    const result = await calculateTaskFinancials(snapshot);
 
-  showCalcWarnings(result.warnings);
+    if (!overridden.new_price) setFieldValue('new_price', result.price_snapshot);
+    if (!overridden.actual_quantity) setFieldValue('actual_quantity', result.actual_quantity);
+    if (!overridden.new_total_price) setFieldValue('new_total_price', result.new_total_price);
+    if (!overridden.lmp_portion) setFieldValue('lmp_portion', result.lmp_portion);
+    if (!overridden.contractor_portion) setFieldValue('contractor_portion', result.contractor_portion);
+    setFieldValue('catalog_year', result.catalog_year ?? '');
+    setFieldValue('portion_rule_id', result.portion_rule_id ?? '');
+
+    showCalcWarnings(result.warnings);
+  } catch (err) {
+    showToast('Could not recalculate frozen values for this done date. Please re-check before saving.', 'error');
+  }
 }
 
 function wireCalcEngine(overridden, getIsFrozen, setIsFrozen) {
@@ -1823,13 +1966,23 @@ async function handleTaskFormSubmit(e, taskId) {
     return;
   }
 
-  const result = taskId ? await updateTask(taskId, formData) : await addTask(formData);
-  if (result && result.error) {
-    window.alert(result.error);
-    return;
-  }
+  const saveBtn = document.getElementById('task-form-save');
+  setButtonLoading(saveBtn, true);
 
-  await renderCoordinatorTaskList();
+  try {
+    const result = taskId ? await updateTask(taskId, formData) : await addTask(formData);
+    if (result && result.error) {
+      setButtonLoading(saveBtn, false);
+      showToast(result.error, 'error');
+      return;
+    }
+
+    showToast(taskId ? 'Task updated.' : 'Task added.', 'success');
+    await renderCoordinatorTaskList();
+  } catch (err) {
+    setButtonLoading(saveBtn, false);
+    showToast('Could not save task. Please try again.', 'error');
+  }
 }
 
 /* ==========================================================================
@@ -1936,7 +2089,7 @@ function bulkRowHtml(row, idx) {
       <td><input type="date" class="input" data-row="${idx}" data-field="done_date" value="${doneDateVal}"></td>
       <td class="num-col mono bulk-price-cell">${priceText}</td>
       <td><input type="text" class="input" data-row="${idx}" data-field="comments" value="${escapeHtml(row.comments || '')}"></td>
-      <td><button type="button" class="icon-btn sm-icon-btn" data-action="remove-row" data-row="${idx}" title="Remove row">${iconSvg('trash', 13)}</button></td>
+      <td><button type="button" class="icon-btn sm-icon-btn" data-action="remove-row" data-row="${idx}" title="Remove row" aria-label="Remove row">${iconSvg('trash', 13)}</button></td>
     </tr>`;
 }
 
@@ -2076,27 +2229,31 @@ async function computeBulkRowFinancials(idx) {
     return;
   }
 
-  const result = await calculateTaskFinancials({
-    line_item_code: row.line_item_code,
-    absolute_quantity: row.absolute_quantity || 0,
-    distance: getRawField('distance'),
-    done_date: row.done_date,
-    contractor: getRawField('contractor'),
-    new_price_overridden: false,
-    actual_quantity: row.actual_quantity,
-    actual_quantity_overridden: row.actual_quantity_overridden,
-    new_total_price_overridden: false,
-    lmp_portion_overridden: false,
-    contractor_portion_overridden: false
-  });
+  try {
+    const result = await calculateTaskFinancials({
+      line_item_code: row.line_item_code,
+      absolute_quantity: row.absolute_quantity || 0,
+      distance: getRawField('distance'),
+      done_date: row.done_date,
+      contractor: getRawField('contractor'),
+      new_price_overridden: false,
+      actual_quantity: row.actual_quantity,
+      actual_quantity_overridden: row.actual_quantity_overridden,
+      new_total_price_overridden: false,
+      lmp_portion_overridden: false,
+      contractor_portion_overridden: false
+    });
 
-  row.new_price = result.price_snapshot;
-  if (!row.actual_quantity_overridden) row.actual_quantity = result.actual_quantity;
-  row.new_total_price = result.new_total_price;
-  row.lmp_portion = result.lmp_portion;
-  row.contractor_portion = result.contractor_portion;
-  row.catalog_year = result.catalog_year;
-  row.portion_rule_id = result.portion_rule_id;
+    row.new_price = result.price_snapshot;
+    if (!row.actual_quantity_overridden) row.actual_quantity = result.actual_quantity;
+    row.new_total_price = result.new_total_price;
+    row.lmp_portion = result.lmp_portion;
+    row.contractor_portion = result.contractor_portion;
+    row.catalog_year = result.catalog_year;
+    row.portion_rule_id = result.portion_rule_id;
+  } catch (err) {
+    showToast('Could not calculate price for a row. Please re-check it before saving.', 'error');
+  }
 }
 
 function updateRowCalculatedCellsDOM(idx) {
@@ -2217,28 +2374,32 @@ async function handleApplyTemplate() {
   const templateId = Number(select.value);
   if (!templateId) return;
 
-  const items = await db.task_template_items.where('template_id').equals(templateId).sortBy('sort_order');
-  if (items.length === 0) {
-    showToast('This template has no line items.', 'warning');
-    return;
+  try {
+    const items = await db.task_template_items.where('template_id').equals(templateId).sortBy('sort_order');
+    if (items.length === 0) {
+      showToast('This template has no line items.', 'warning');
+      return;
+    }
+
+    const template = await db.task_templates.get(templateId);
+    if (template) {
+      await db.task_templates.update(templateId, { times_applied: (template.times_applied || 0) + 1 });
+    }
+
+    bulkState.rows = items.map(item => createBulkRow({
+      line_item_code: item.line_item_code,
+      absolute_quantity: item.default_qty ?? null
+    }));
+    bulkState.rows.push(createBulkRow());
+
+    for (let i = 0; i < bulkState.rows.length - 1; i++) {
+      await computeBulkRowFinancials(i);
+    }
+
+    renderBulkRowsTable();
+  } catch (err) {
+    showToast('Could not apply the template. Please try again.', 'error');
   }
-
-  const template = await db.task_templates.get(templateId);
-  if (template) {
-    await db.task_templates.update(templateId, { times_applied: (template.times_applied || 0) + 1 });
-  }
-
-  bulkState.rows = items.map(item => createBulkRow({
-    line_item_code: item.line_item_code,
-    absolute_quantity: item.default_qty ?? null
-  }));
-  bulkState.rows.push(createBulkRow());
-
-  for (let i = 0; i < bulkState.rows.length - 1; i++) {
-    await computeBulkRowFinancials(i);
-  }
-
-  renderBulkRowsTable();
 }
 
 function handleFillSameStatus(e) {
@@ -2332,57 +2493,65 @@ async function handleBulkSave() {
     return;
   }
 
-  const currentUser = getCurrentUser();
-  const now = new Date();
-  const tasksToCreate = [];
+  const saveBtn = document.getElementById('bulk-save-btn');
+  setButtonLoading(saveBtn, true, 'Saving…');
 
-  for (const { row } of dirtyRows) {
-    const id = await generateTaskId(currentUser.prefix);
-    tasksToCreate.push({
-      ...header,
-      id,
-      line_item_code: row.line_item_code,
-      absolute_quantity: row.absolute_quantity,
-      actual_quantity: row.actual_quantity,
-      actual_quantity_overridden: row.actual_quantity_overridden,
-      new_price: row.new_price,
-      new_price_overridden: false,
-      new_total_price: row.new_total_price,
-      new_total_price_overridden: false,
-      catalog_year: row.catalog_year,
-      portion_rule_id: row.portion_rule_id,
-      lmp_portion: row.lmp_portion,
-      lmp_portion_overridden: false,
-      contractor_portion: row.contractor_portion,
-      contractor_portion_overridden: false,
-      status: row.status,
-      done_date: row.done_date,
-      comments: row.comments || null,
-      main_task: null,
-      task_name: null,
-      task_date: null,
-      prq: null,
-      pc: null,
-      is_deleted: false,
-      is_locked: false,
-      created_at: now,
-      updated_at: now,
-      created_by: currentUser.id,
-      coordinator_id: currentUser.id,
-      coordinator_name: currentUser.name
-    });
-  }
+  try {
+    const currentUser = getCurrentUser();
+    const now = new Date();
+    const tasksToCreate = [];
 
-  await db.transaction('rw', db.tasks, db.audit_log, async () => {
-    await db.tasks.bulkAdd(tasksToCreate);
-    for (const task of tasksToCreate) {
-      await writeAuditLog({ task_id: task.id, user_id: currentUser.id, action: 'task_created' });
+    for (const { row } of dirtyRows) {
+      const id = await generateTaskId(currentUser.prefix);
+      tasksToCreate.push({
+        ...header,
+        id,
+        line_item_code: row.line_item_code,
+        absolute_quantity: row.absolute_quantity,
+        actual_quantity: row.actual_quantity,
+        actual_quantity_overridden: row.actual_quantity_overridden,
+        new_price: row.new_price,
+        new_price_overridden: false,
+        new_total_price: row.new_total_price,
+        new_total_price_overridden: false,
+        catalog_year: row.catalog_year,
+        portion_rule_id: row.portion_rule_id,
+        lmp_portion: row.lmp_portion,
+        lmp_portion_overridden: false,
+        contractor_portion: row.contractor_portion,
+        contractor_portion_overridden: false,
+        status: row.status,
+        done_date: row.done_date,
+        comments: row.comments || null,
+        main_task: null,
+        task_name: null,
+        task_date: null,
+        prq: null,
+        pc: null,
+        is_deleted: false,
+        is_locked: false,
+        created_at: now,
+        updated_at: now,
+        created_by: currentUser.id,
+        coordinator_id: currentUser.id,
+        coordinator_name: currentUser.name
+      });
     }
-  });
 
-  showToast(`${tasksToCreate.length} task${tasksToCreate.length === 1 ? '' : 's'} created for site ${header.physical_site_id}.`, 'success');
+    await db.transaction('rw', db.tasks, db.audit_log, async () => {
+      await db.tasks.bulkAdd(tasksToCreate);
+      for (const task of tasksToCreate) {
+        await writeAuditLog({ task_id: task.id, user_id: currentUser.id, action: 'task_created' });
+      }
+    });
 
-  await renderCoordinatorTaskList();
+    showToast(`${tasksToCreate.length} task${tasksToCreate.length === 1 ? '' : 's'} created for site ${header.physical_site_id}.`, 'success');
+
+    await renderCoordinatorTaskList();
+  } catch (err) {
+    setButtonLoading(saveBtn, false);
+    showToast('Could not save these tasks. Please try again.', 'error');
+  }
 }
 
 function attachBulkEntryEvents() {
@@ -2406,6 +2575,10 @@ function attachBulkEntryEvents() {
   tbody.addEventListener('input', handleBulkRowInput);
   tbody.addEventListener('change', handleBulkRowChange);
   tbody.addEventListener('click', handleBulkRowClick);
+
+  const formContainer = document.querySelector('.task-form-page .task-form-grid');
+  autofocusFirstField(formContainer);
+  enableEnterToSubmit(formContainer, document.getElementById('bulk-save-btn'));
 }
 
 window.renderBulkEntryForm = renderBulkEntryForm;

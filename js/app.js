@@ -140,7 +140,7 @@ function renderNav() {
           <div class="sidebar-user-name">${escapeHtml(user.name)}</div>
           <div class="sidebar-user-role">${escapeHtml(roleLabel(user.role))}</div>
         </div>
-        <button id="sidebar-logout-btn" class="sidebar-logout-btn" title="Log out">${iconSvg('logout', 16)}</button>
+        <button id="sidebar-logout-btn" class="sidebar-logout-btn" title="Log out" aria-label="Log out">${iconSvg('logout', 16)}</button>
       </div>`;
   } else {
     nav.innerHTML = items.map(item => bottomNavItemHtml(item, currentHash)).join('') +
@@ -205,7 +205,7 @@ function renderTopbar() {
   if (!container) return;
 
   container.innerHTML = `
-    <button id="sidebar-toggle-btn" class="icon-btn" title="Toggle sidebar">${iconSvg('rows', 17)}</button>
+    <button id="sidebar-toggle-btn" class="icon-btn" title="Toggle sidebar" aria-label="Toggle sidebar">${iconSvg('rows', 17)}</button>
     <div class="topbar-breadcrumb">
       <span class="breadcrumb-root">PM Console</span>
       ${iconSvg('chevRight', 14)}
@@ -217,7 +217,7 @@ function renderTopbar() {
       <span class="kbd">⌘K</span>
     </div>
     <div class="topbar-notif-wrap">
-      <button id="topbar-bell-btn" class="icon-btn" title="Notifications">
+      <button id="topbar-bell-btn" class="icon-btn" title="Notifications" aria-label="Notifications">
         ${iconSvg('bell', 18)}
         <span class="notif-dot"></span>
       </button>
@@ -280,8 +280,7 @@ function renderReports() {
 }
 
 window.onLoginSuccess = async function (session) {
-  const loadingScreen = document.getElementById('loading-screen');
-  if (loadingScreen) loadingScreen.remove();
+  hideFullPageLoader();
   await renderAppShell();
   renderNav();
   handleRouteChange();
@@ -294,11 +293,17 @@ window.redirectToDashboard = function () {
 async function init() {
   if (typeof window.initPWA === 'function') window.initPWA();
 
-  await purgeSoftDeleted();
-  const { needsSetup } = await runSeed();
+  let needsSetup = false;
+  try {
+    await purgeSoftDeleted();
+    ({ needsSetup } = await runSeed());
+  } catch (err) {
+    hideFullPageLoader();
+    showToast('Could not load the local database. Please reload the app.', 'error');
+    return;
+  }
 
-  const loadingScreen = document.getElementById('loading-screen');
-  if (loadingScreen) loadingScreen.remove();
+  hideFullPageLoader();
 
   if (needsSetup) {
     renderSetupWizard();

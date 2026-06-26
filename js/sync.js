@@ -222,7 +222,7 @@ function confirmDialog({ title, message, confirmLabel }) {
         <div class="card modal" id="sync-confirm-card">
           <div class="modal-header">
             <h2>${escapeHtml(title)}</h2>
-            <button class="icon-btn" id="sync-confirm-close">${iconSvg('close', 16)}</button>
+            <button class="icon-btn" id="sync-confirm-close" aria-label="Close modal">${iconSvg('close', 16)}</button>
           </div>
           <div class="modal-body">
             <p style="font-size:13px;color:var(--ink-2);line-height:1.5;margin:0">${escapeHtml(message)}</p>
@@ -241,6 +241,8 @@ function confirmDialog({ title, message, confirmLabel }) {
     document.getElementById('sync-confirm-cancel').addEventListener('click', () => close(false));
     document.getElementById('sync-confirm-ok').addEventListener('click', () => close(true));
     document.addEventListener('keydown', escHandler);
+
+    document.getElementById('sync-confirm-ok').focus();
   });
 }
 
@@ -325,7 +327,13 @@ async function loadFromSharedFolder() {
     return;
   }
 
-  const existingTasks = await db.tasks.toArray();
+  let existingTasks;
+  try {
+    existingTasks = await db.tasks.toArray();
+  } catch (e) {
+    showToast('Could not read your local tasks to compare with the shared file.', 'error');
+    return;
+  }
   const diff = diffMasterSync(payload.tasks, existingTasks);
 
   const proceed = await confirmDialog({
@@ -335,11 +343,15 @@ async function loadFromSharedFolder() {
   });
   if (!proceed) return;
 
-  await applyMasterPayload(payload);
-  await writeLockFile(handle, currentUser);
-
-  await db.app_settings.put({ key: SYNC_LAST_LOADED_KEY, value: new Date().toISOString(), updated_at: new Date() });
-  await appendSyncHistory({ action: 'load', by: currentUser.name, timestamp: new Date().toISOString(), task_count: payload.tasks.length });
+  try {
+    await applyMasterPayload(payload);
+    await writeLockFile(handle, currentUser);
+    await db.app_settings.put({ key: SYNC_LAST_LOADED_KEY, value: new Date().toISOString(), updated_at: new Date() });
+    await appendSyncHistory({ action: 'load', by: currentUser.name, timestamp: new Date().toISOString(), task_count: payload.tasks.length });
+  } catch (e) {
+    showToast('Could not apply the master file to your local copy.', 'error');
+    return;
+  }
 
   showToast(`Master loaded. ${diff.newCount} new, ${diff.changedCount} changed.`, 'success');
   if (typeof settingsState !== 'undefined' && settingsState.activeSection === 'sync') renderSyncSettings();
@@ -406,7 +418,14 @@ async function attemptRetrySave() {
 
 async function performSave({ isRetry }) {
   const currentUser = getCurrentUser();
-  const payload = await buildMasterExportPayload();
+
+  let payload;
+  try {
+    payload = await buildMasterExportPayload();
+  } catch (e) {
+    showToast('Could not read your local data to save. Please try again.', 'error');
+    return;
+  }
 
   const handle = isRetry ? await getStoredDirHandle() : await getReadySharedFolderHandle();
   if (!handle) return;
@@ -421,7 +440,13 @@ async function performSave({ isRetry }) {
     await writeJsonToFolder(handle, MASTER_FILENAME, payload);
     await deleteLockFile(handle);
   } catch (e) {
-    if (!isRetry) await handleSaveFailure(payload);
+    if (!isRetry) {
+      try {
+        await handleSaveFailure(payload);
+      } catch (e2) {
+        showToast('Shared folder save failed and the emergency backup could not be saved either. Do not close the app — please try again.', 'error');
+      }
+    }
     return;
   }
 
@@ -670,11 +695,17 @@ async function renderSyncSettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  const label = getSharedFolderLabel();
-  const handle = await getStoredDirHandle();
-  const lastLoadedSetting = await db.app_settings.get(SYNC_LAST_LOADED_KEY);
-  const lastSavedSetting = await db.app_settings.get(SYNC_LAST_SAVED_KEY);
-  const history = await getSyncHistory();
+  let label, handle, lastLoadedSetting, lastSavedSetting, history;
+  try {
+    label = getSharedFolderLabel();
+    handle = await getStoredDirHandle();
+    lastLoadedSetting = await db.app_settings.get(SYNC_LAST_LOADED_KEY);
+    lastSavedSetting = await db.app_settings.get(SYNC_LAST_SAVED_KEY);
+    history = await getSyncHistory();
+  } catch (err) {
+    showToast('Could not load sync settings.', 'error');
+    return;
+  }
 
   container.innerHTML = `
     <div class="fade-in">
@@ -743,8 +774,16 @@ function attachSyncSettingsEvents() {
     }
   });
   document.getElementById('sync-test-btn').addEventListener('click', testSharedFolderPath);
-  document.getElementById('sync-load-btn').addEventListener('click', loadFromSharedFolder);
-  document.getElementById('sync-save-btn').addEventListener('click', saveToSharedFolder);
+  document.getElementById('sync-load-btn').addEventListener('click', async (e) => {
+    setButtonLoading(e.currentTarget, true, 'Loading…');
+    await loadFromSharedFolder();
+    setButtonLoading(e.currentTarget, false);
+  });
+  document.getElementById('sync-save-btn').addEventListener('click', async (e) => {
+    setButtonLoading(e.currentTarget, true, 'Saving…');
+    await saveToSharedFolder();
+    setButtonLoading(e.currentTarget, false);
+  });
 }
 
 window.isFileSystemAccessSupported = isFileSystemAccessSupported;

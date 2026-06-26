@@ -126,20 +126,25 @@ async function backupNow(silent) {
   const currentUser = getCurrentUser();
   if (!currentUser) return null;
 
-  const now = new Date();
-  const payload = await buildBackupPayload(currentUser);
-  const filename = backupFilenameFor(currentUser, now);
-  const result = await writeBackupFile(filename, payload);
+  try {
+    const now = new Date();
+    const payload = await buildBackupPayload(currentUser);
+    const filename = backupFilenameFor(currentUser, now);
+    const result = await writeBackupFile(filename, payload);
 
-  await setLastBackupInfo({ timestamp: now.toISOString(), location: result.location, filename, task_count: payload.tasks.length });
+    await setLastBackupInfo({ timestamp: now.toISOString(), location: result.location, filename, task_count: payload.tasks.length });
 
-  if (silent) {
-    showToast('Auto-backup saved', 'success', 3000);
-  } else {
-    showToast(`Backup saved: ${filename}`, 'success');
+    if (silent) {
+      showToast('Auto-backup saved', 'success', 3000);
+    } else {
+      showToast(`Backup saved: ${filename}`, 'success');
+    }
+
+    return { filename, location: result.location, task_count: payload.tasks.length };
+  } catch (err) {
+    showToast('Backup failed. Please try again or check your backup folder.', 'error');
+    return null;
   }
-
-  return { filename, location: result.location, task_count: payload.tasks.length };
 }
 
 async function startAutoBackup() {
@@ -174,22 +179,30 @@ async function restoreFromBackup(file) {
   const confirmed = window.confirm(`This backup contains ${data.tasks.length} tasks from ${dateLabel}. Restore will replace your local data. Continue?`);
   if (!confirmed) return;
 
-  await db.tasks.clear();
-  if (data.tasks.length) await db.tasks.bulkAdd(data.tasks);
+  const restoreBtn = document.getElementById('restore-backup-btn');
+  setButtonLoading(restoreBtn, true, 'Restoring…');
 
-  if (data.settings && typeof data.settings === 'object') {
-    const now = new Date();
-    for (const [key, value] of Object.entries(data.settings)) {
-      if (key.endsWith('_dir_handle')) continue;
-      await db.app_settings.put({ key, value, updated_at: now });
+  try {
+    await db.tasks.clear();
+    if (data.tasks.length) await db.tasks.bulkAdd(data.tasks);
+
+    if (data.settings && typeof data.settings === 'object') {
+      const now = new Date();
+      for (const [key, value] of Object.entries(data.settings)) {
+        if (key.endsWith('_dir_handle')) continue;
+        await db.app_settings.put({ key, value, updated_at: now });
+      }
     }
+
+    const currentUser = getCurrentUser();
+    await writeAuditLog({ user_id: currentUser ? currentUser.id : null, action: 'restore_applied' });
+
+    showToast(`Restore complete. ${data.tasks.length} tasks loaded.`, 'success');
+    setTimeout(() => location.reload(), 1200);
+  } catch (err) {
+    setButtonLoading(restoreBtn, false);
+    showToast('Restore failed partway through. Please reload and check your data before retrying.', 'error');
   }
-
-  const currentUser = getCurrentUser();
-  await writeAuditLog({ user_id: currentUser ? currentUser.id : null, action: 'restore_applied' });
-
-  showToast(`Restore complete. ${data.tasks.length} tasks loaded.`, 'success');
-  setTimeout(() => location.reload(), 1200);
 }
 
 /* ==========================================================================
@@ -207,10 +220,16 @@ async function renderBackupSettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  const label = getBackupFolderLabel();
-  const handle = await getStoredBackupDirHandle();
-  const intervalMinutes = await getBackupIntervalMinutes();
-  const lastBackup = await getLastBackupInfo();
+  let label, handle, intervalMinutes, lastBackup;
+  try {
+    label = getBackupFolderLabel();
+    handle = await getStoredBackupDirHandle();
+    intervalMinutes = await getBackupIntervalMinutes();
+    lastBackup = await getLastBackupInfo();
+  } catch (err) {
+    showToast('Could not load backup settings.', 'error');
+    return;
+  }
 
   container.innerHTML = `
     <div class="fade-in">
@@ -267,11 +286,17 @@ function attachBackupSettingsEvents() {
   });
   document.getElementById('backup-interval-select').addEventListener('change', async (e) => {
     const minutes = Number(e.target.value);
-    await setBackupIntervalMinutes(minutes);
-    await startAutoBackup();
-    showToast(`Auto-backup interval set to ${minutes} minutes.`, 'success');
+    try {
+      await setBackupIntervalMinutes(minutes);
+      await startAutoBackup();
+      showToast(`Auto-backup interval set to ${minutes} minutes.`, 'success');
+    } catch (err) {
+      showToast('Could not update the backup interval. Please try again.', 'error');
+    }
   });
   document.getElementById('backup-now-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('backup-now-btn');
+    setButtonLoading(btn, true, 'Backing up…');
     await backupNow(false);
     renderBackupSettings();
   });
