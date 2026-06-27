@@ -290,13 +290,183 @@ window.redirectToDashboard = function () {
   navigateTo('#dashboard');
 };
 
+const PM_SETUP_CODE = 'LMP-SETUP-2026';
+
+function proceedToReady() {
+  const user = getCurrentUser();
+  if (!user) {
+    renderLoginScreen();
+    return;
+  }
+  renderAppShellReady();
+}
+
+async function renderAppShellReady() {
+  await renderAppShell();
+  renderNav();
+  handleRouteChange();
+}
+
+function renderAccountLoadingScreen() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div id="loading-screen">
+      <div class="page-spinner"></div>
+      <div class="loading-text">Loading your account...</div>
+    </div>`;
+}
+
+function renderFirstLaunchNoScript() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="h-full w-full flex flex-col items-center justify-center gap-6 bg-[var(--bg)] p-6">
+      <div class="flex flex-col sm:flex-row gap-5">
+        <div class="fade-in w-[280px] bg-[var(--surface)] border border-[var(--line)] rounded-[10px] p-6 flex flex-col items-center text-center gap-2" style="box-shadow:var(--shadow)">
+          <div class="text-[28px]">📋</div>
+          <div class="text-[15px] font-semibold text-[var(--ink)]">I'm a team member</div>
+          <div class="text-[12.5px] text-[var(--ink-2)] mb-2">Ask your PM for the credentials package file.</div>
+          <button id="load-credentials-btn" type="button" class="h-[34px] px-[14px] rounded-[7px] border border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--surface-2)] text-[13px] font-semibold text-[var(--ink)] transition-colors">Load credentials package</button>
+        </div>
+        <div id="pm-setup-card" class="fade-in w-[280px] bg-[var(--surface)] border border-[var(--line)] rounded-[10px] p-6 flex flex-col items-center text-center gap-2" style="box-shadow:var(--shadow)">
+          <div class="text-[28px]">🔧</div>
+          <div class="text-[15px] font-semibold text-[var(--ink)]">I'm the Project Manager</div>
+          <div class="text-[12.5px] text-[var(--ink-2)] mb-2">Set up the app for your team.</div>
+          <button id="pm-setup-btn" type="button" class="h-[34px] px-[14px] rounded-[7px] bg-[var(--accent)] hover:bg-[var(--accent-ink)] text-white text-[13px] font-semibold transition-colors" style="box-shadow:var(--shadow-sm)">PM Setup</button>
+        </div>
+      </div>
+      <div class="text-[11.5px] text-[var(--ink-3)] text-center max-w-[420px]">
+        Already have the Apps Script URL?<br>
+        Set it up in Settings → Sync &amp; Shared Folder after logging in.
+      </div>
+    </div>`;
+
+  document.getElementById('load-credentials-btn').addEventListener('click', triggerCredentialsImport);
+  document.getElementById('pm-setup-btn').addEventListener('click', () => renderPmSetupGate('pm-setup-card'));
+}
+
+function renderFirstLaunchFailed() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="h-full w-full flex items-center justify-center bg-[var(--bg)]">
+      <div id="first-launch-failed-card" class="fade-in w-full max-w-[400px] bg-[var(--surface)] border border-[var(--line)] rounded-[10px] p-8 text-center" style="box-shadow:var(--shadow)">
+        <div class="text-[28px] text-[var(--amber)]">⚠</div>
+        <div class="text-[16px] font-semibold text-[var(--ink)] mt-2">Could not load accounts</div>
+        <div class="text-[13px] text-[var(--ink-2)] mt-1 mb-5">Check your internet connection and try again.</div>
+        <button id="first-launch-retry-btn" type="button" class="w-full h-[34px] rounded-[7px] bg-[var(--accent)] hover:bg-[var(--accent-ink)] text-white text-[13px] font-semibold transition-colors" style="box-shadow:var(--shadow-sm)">Retry</button>
+        <div class="text-[11.5px] text-[var(--ink-3)] my-4">— or —</div>
+        <button id="first-launch-credentials-link" type="button" class="text-[12.5px] text-[var(--accent)] font-semibold underline">Load credentials package instead</button>
+        <div class="text-[11.5px] text-[var(--ink-3)] mt-5">Are you the PM setting up for the first time?</div>
+        <button id="first-launch-pm-setup-link" type="button" class="text-[12.5px] text-[var(--accent)] font-semibold underline mt-1">PM Setup →</button>
+      </div>
+    </div>`;
+
+  document.getElementById('first-launch-retry-btn').addEventListener('click', () => runFirstLaunchAccountSync());
+  document.getElementById('first-launch-credentials-link').addEventListener('click', triggerCredentialsImport);
+  document.getElementById('first-launch-pm-setup-link').addEventListener('click', () => renderPmSetupGate('first-launch-failed-card'));
+}
+
+function renderPmSetupGate(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="text-[15px] font-semibold text-[var(--ink)]">PM Setup</div>
+    <label class="flex flex-col gap-[5px] w-full mt-2">
+      <span class="text-[11.5px] font-semibold text-[var(--ink-2)]">Enter setup code</span>
+      <input id="pm-setup-code-input" type="text" autocomplete="off"
+        class="h-[34px] px-[10px] rounded-[7px] border border-[var(--line)] bg-[var(--surface)] text-[13px] text-[var(--ink)] outline-none focus:border-[var(--accent)] focus:shadow-[0_0_0_3px_var(--accent-bg)] transition-colors">
+    </label>
+    <div id="pm-setup-code-error" class="hidden text-[12px] text-[var(--red)] mt-1"></div>
+    <button id="pm-setup-code-submit" type="button" class="w-full h-[34px] mt-3 rounded-[7px] bg-[var(--accent)] hover:bg-[var(--accent-ink)] text-white text-[13px] font-semibold transition-colors" style="box-shadow:var(--shadow-sm)">Continue</button>`;
+
+  const input = document.getElementById('pm-setup-code-input');
+  const errorEl = document.getElementById('pm-setup-code-error');
+
+  function submitSetupCode() {
+    if (input.value === PM_SETUP_CODE) {
+      renderSetupWizard();
+      return;
+    }
+    errorEl.textContent = 'Incorrect setup code';
+    errorEl.classList.remove('hidden');
+    container.classList.remove('shake');
+    requestAnimationFrame(() => container.classList.add('shake'));
+  }
+
+  document.getElementById('pm-setup-code-submit').addEventListener('click', submitSetupCode);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitSetupCode();
+  });
+}
+
+function triggerCredentialsImport() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.addEventListener('change', handleCredentialsFileSelected);
+  input.click();
+}
+
+async function handleCredentialsFileSelected(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    if (!data || data.type !== 'credentials_package') {
+      showToast('Invalid file. Ask your PM for a credentials package.', 'error');
+      return;
+    }
+
+    for (const user of data.users || []) {
+      await db.users.put(user);
+    }
+
+    const settings = data.app_settings || {};
+    for (const key of Object.keys(settings)) {
+      const entry = settings[key];
+      const value = entry && typeof entry === 'object' && 'value' in entry ? entry.value : entry;
+      await db.app_settings.put({ key, value, updated_at: new Date() });
+    }
+
+    showToast('Account loaded. You can now log in.', 'success');
+    proceedToReady();
+  } catch (err) {
+    showToast('Invalid file. Ask your PM for a credentials package.', 'error');
+  }
+}
+
+async function runFirstLaunchAccountSync() {
+  renderAccountLoadingScreen();
+
+  try {
+    await syncUsersToLocal(db);
+    proceedToReady();
+  } catch (err) {
+    if (err.message === 'SCRIPT_URL_NOT_CONFIGURED') {
+      renderFirstLaunchNoScript();
+    } else {
+      renderFirstLaunchFailed();
+    }
+  }
+}
+
 async function init() {
   if (typeof window.initPWA === 'function') window.initPWA();
 
-  let needsSetup = false;
   try {
     await purgeSoftDeleted();
-    ({ needsSetup } = await runSeed());
+  } catch (err) {
+    hideFullPageLoader();
+    showToast('Could not load the local database. Please reload the app.', 'error');
+    return;
+  }
+
+  let userCount = 0;
+  try {
+    userCount = await db.users.count();
   } catch (err) {
     hideFullPageLoader();
     showToast('Could not load the local database. Please reload the app.', 'error');
@@ -305,20 +475,15 @@ async function init() {
 
   hideFullPageLoader();
 
-  if (needsSetup) {
-    renderSetupWizard();
+  if (userCount === 0) {
+    await runFirstLaunchAccountSync();
     return;
   }
 
-  const user = getCurrentUser();
-  if (!user) {
-    renderLoginScreen();
-    return;
-  }
-
-  await renderAppShell();
-  renderNav();
-  handleRouteChange();
+  proceedToReady();
+  syncUsersToLocal(db).catch(() => {
+    // Silent failure on background sync — use cached users
+  });
 }
 
 window.addEventListener('hashchange', handleRouteChange);

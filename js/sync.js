@@ -695,22 +695,32 @@ async function renderSyncSettings() {
   const container = document.getElementById('settings-content');
   if (!container) return;
 
-  let label, handle, lastLoadedSetting, lastSavedSetting, history;
+  const currentUser = getCurrentUser();
+  const isPM = !!currentUser && currentUser.role === 'project_manager';
+
+  let label, handle, lastLoadedSetting, lastSavedSetting, history, scriptUrlSetting, pendingSyncSetting;
   try {
     label = getSharedFolderLabel();
     handle = await getStoredDirHandle();
     lastLoadedSetting = await db.app_settings.get(SYNC_LAST_LOADED_KEY);
     lastSavedSetting = await db.app_settings.get(SYNC_LAST_SAVED_KEY);
     history = await getSyncHistory();
+    scriptUrlSetting = await db.app_settings.get('apps_script_url');
+    pendingSyncSetting = await db.app_settings.get(PENDING_SYNC_KEY);
   } catch (err) {
     showToast('Could not load sync settings.', 'error');
     return;
   }
 
+  const scriptUrl = (scriptUrlSetting && scriptUrlSetting.value) || '';
+  const pendingCount = pendingSyncSetting ? JSON.parse(pendingSyncSetting.value).length : 0;
+
   container.innerHTML = `
     <div class="fade-in">
       <h1>Sync &amp; Shared Folder</h1>
       <p class="tasks-subtitle">PM, AM, and CCM share the master task list through this folder.</p>
+
+      ${isPM ? appsScriptUrlCardHtml(scriptUrl, pendingCount) : ''}
 
       <div class="card sync-card">
         <div class="sync-card-title">Shared Folder Path</div>
@@ -760,7 +770,63 @@ async function renderSyncSettings() {
   attachSyncSettingsEvents();
 }
 
+function appsScriptUrlCardHtml(scriptUrl, pendingCount) {
+  return `
+    <div class="card sync-card">
+      <div class="sync-card-title">Apps Script URL</div>
+      <p style="font-size:12px;color:var(--ink-3);margin:0 0 10px">Your deployed Google Apps Script Web App URL. Required for automatic user account sync across devices.</p>
+      <div class="sync-folder-row">
+        <input id="script-url-input" type="text" class="input" placeholder="https://script.google.com/macros/s/.../exec" value="${escapeHtml(scriptUrl)}">
+        <button id="script-url-save-btn" class="btn ghost">Save URL</button>
+        <button id="script-url-test-btn" class="btn ghost">Test connection</button>
+      </div>
+      <div class="sync-action-meta" style="display:flex;align-items:center;gap:6px;margin-top:8px">
+        <span style="width:7px;height:7px;border-radius:50%;display:inline-block;background:${scriptUrl ? 'var(--green)' : 'var(--amber)'}"></span>
+        <span>${scriptUrl ? 'Configured' : 'Not configured — user sync disabled'}</span>
+      </div>
+      ${pendingCount > 0 ? `
+      <div class="sync-error-banner" style="background:var(--amber-bg);color:var(--amber);border-bottom:none;border-radius:7px;margin-top:12px">
+        <span class="sync-error-banner-text">${pendingCount} user change${pendingCount === 1 ? '' : 's'} waiting to sync to Sheet.</span>
+        <button id="pending-sync-retry-btn" class="btn ghost sm">Retry now</button>
+      </div>` : ''}
+    </div>`;
+}
+
 function attachSyncSettingsEvents() {
+  const scriptUrlSaveBtn = document.getElementById('script-url-save-btn');
+  if (scriptUrlSaveBtn) {
+    scriptUrlSaveBtn.addEventListener('click', async () => {
+      const value = document.getElementById('script-url-input').value.trim();
+      await db.app_settings.put({ key: 'apps_script_url', value, updated_at: new Date() });
+      showToast('Script URL saved.', 'success');
+      renderSyncSettings();
+    });
+  }
+
+  const scriptUrlTestBtn = document.getElementById('script-url-test-btn');
+  if (scriptUrlTestBtn) {
+    scriptUrlTestBtn.addEventListener('click', async (e) => {
+      setButtonLoading(e.currentTarget, true, 'Testing…');
+      try {
+        const users = await fetchUsersFromSheet(db);
+        showToast(`Connection successful. ${users.length} users found.`, 'success');
+      } catch (err) {
+        showToast('Connection failed. Check the URL.', 'error');
+      }
+      setButtonLoading(e.currentTarget, false);
+    });
+  }
+
+  const pendingSyncRetryBtn = document.getElementById('pending-sync-retry-btn');
+  if (pendingSyncRetryBtn) {
+    pendingSyncRetryBtn.addEventListener('click', async (e) => {
+      setButtonLoading(e.currentTarget, true, 'Retrying…');
+      const result = await retryPendingSync(db);
+      showToast(`${result.retried} changes synced. ${result.remaining} remaining.`, 'success');
+      renderSyncSettings();
+    });
+  }
+
   document.getElementById('sync-folder-input').addEventListener('blur', (e) => {
     setSharedFolderLabel(e.target.value.trim());
     renderSyncSettings();

@@ -968,6 +968,9 @@ function userAccountsPageHtml() {
           <h1>User Accounts</h1>
           <p class="tasks-subtitle">${userAccountsState.masterUsers.length} master team member${userAccountsState.masterUsers.length === 1 ? '' : 's'} · ${userAccountsState.coordinators.length} coordinator${userAccountsState.coordinators.length === 1 ? '' : 's'}</p>
         </div>
+        <div class="tasks-page-header-actions">
+          <button id="export-credentials-btn" class="btn ghost sm">${iconSvg('download', 14)}<span>Export Credentials Package</span></button>
+        </div>
       </div>
 
       <div class="card user-accounts-section">
@@ -1082,6 +1085,7 @@ function findUserAccountById(id) {
 function attachUserAccountsEvents() {
   document.getElementById('add-master-user-btn').addEventListener('click', () => openUserFormModal({ mode: 'create', accountType: 'master' }));
   document.getElementById('add-coordinator-btn').addEventListener('click', () => openUserFormModal({ mode: 'create', accountType: 'coordinator' }));
+  document.getElementById('export-credentials-btn').addEventListener('click', handleExportCredentialsPackage);
 
   document.querySelectorAll('[data-action="edit-user"]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1110,6 +1114,40 @@ function attachUserAccountsEvents() {
       if (user) openReassignModal(user);
     });
   });
+}
+
+async function handleExportCredentialsPackage() {
+  const btn = document.getElementById('export-credentials-btn');
+  setButtonLoading(btn, true);
+
+  try {
+    const currentUser = getCurrentUser();
+    const allUsers = await db.users.toArray();
+    const allSettingsRecords = await db.app_settings.toArray();
+
+    const appSettings = {};
+    allSettingsRecords.forEach(s => {
+      appSettings[s.key] = { value: s.value, updated_at: s.updated_at };
+    });
+
+    const payload = {
+      type: 'credentials_package',
+      exported_at: new Date().toISOString(),
+      exported_by: currentUser.name,
+      version: '1.0',
+      users: allUsers,
+      app_settings: appSettings
+    };
+
+    const filename = `credentials_${formatDateISO(new Date())}.json`;
+    downloadBlob(JSON.stringify(payload, null, 2), filename, 'application/json');
+
+    showToast('Credentials package exported. Share this file with anyone who cannot load accounts automatically on first launch.', 'success');
+  } catch (err) {
+    showToast('Could not export the credentials package. Please try again.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -1313,9 +1351,17 @@ async function handleSaveUserForm() {
       if (isMaster) changes.role = role;
       await db.users.update(state.userId, changes);
       showToast('User updated.', 'success');
+
+      const updatedUser = await db.users.get(state.userId);
+      try {
+        await pushUserToSheet(db, 'updateUser', { user: updatedUser });
+      } catch (syncErr) {
+        await queueFailedSync(db, 'updateUser', { user: updatedUser });
+        showToast('User saved. Will sync to sheet when online.', 'warning');
+      }
     } else {
       const password_hash = await hashPassword(password);
-      await db.users.add({
+      const newUser = {
         name,
         email,
         password_hash,
@@ -1324,8 +1370,17 @@ async function handleSaveUserForm() {
         is_active: true,
         must_change_password: true,
         created_at: new Date()
-      });
+      };
+      const id = await db.users.add(newUser);
       showToast(`${isMaster ? 'Master user' : 'Coordinator'} account created.`, 'success');
+
+      const fullUser = { id, ...newUser };
+      try {
+        await pushUserToSheet(db, 'createUser', { user: fullUser });
+      } catch (syncErr) {
+        await queueFailedSync(db, 'createUser', { user: fullUser });
+        showToast('User saved. Will sync to sheet when online.', 'warning');
+      }
     }
 
     closeUserFormModal();
@@ -1398,6 +1453,15 @@ function openResetPasswordModal(user) {
     try {
       const password_hash = await hashPassword(password);
       await db.users.update(user.id, { password_hash, must_change_password: true });
+
+      const updatedUser = { ...user, password_hash, must_change_password: true };
+      try {
+        await pushUserToSheet(db, 'updateUser', { user: updatedUser });
+      } catch (syncErr) {
+        await queueFailedSync(db, 'updateUser', { user: updatedUser });
+        showToast('User saved. Will sync to sheet when online.', 'warning');
+      }
+
       await writeAuditLog({ user_id: getCurrentUser().id, action: 'password_changed', field_name: 'name', new_value: user.name });
 
       showToast(`Password reset for ${user.name}. They must set a new password on next login.`, 'success');
@@ -1430,9 +1494,24 @@ async function handleToggleActive(user) {
       const currentUser = getCurrentUser();
       await db.users.update(user.id, { is_active: false, deactivated_at: new Date(), deactivated_by: currentUser.id });
       showToast(`${user.name} deactivated.`, 'success');
+
+      try {
+        await pushUserToSheet(db, 'deactivateUser', { id: user.id, deactivated_by: currentUser.name });
+      } catch (syncErr) {
+        await queueFailedSync(db, 'deactivateUser', { id: user.id, deactivated_by: currentUser.name });
+        showToast('User saved. Will sync to sheet when online.', 'warning');
+      }
     } else {
       await db.users.update(user.id, { is_active: true, deactivated_at: null, deactivated_by: null });
       showToast(`${user.name} reactivated.`, 'success');
+
+      const reactivatedUser = { ...user, is_active: true, deactivated_at: null, deactivated_by: null };
+      try {
+        await pushUserToSheet(db, 'updateUser', { user: reactivatedUser });
+      } catch (syncErr) {
+        await queueFailedSync(db, 'updateUser', { user: reactivatedUser });
+        showToast('User saved. Will sync to sheet when online.', 'warning');
+      }
     }
 
     await renderUserAccountsSettings();
