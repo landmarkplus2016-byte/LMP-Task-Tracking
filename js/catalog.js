@@ -2,7 +2,9 @@
    Catalog — price catalog upload, storage, lookup (CLAUDE.md Stage 4.1)
    ========================================================================== */
 
-const CATALOG_REQUIRED_COLUMNS = ['code', 'name', 'category', 'price'];
+function normalizeCatalogHeader(h) {
+  return h.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
 
 function defaultCatalogValidFrom(year) {
   return `${year}-04-01`;
@@ -73,13 +75,20 @@ function validateCatalogRows(rows) {
   }
 
   const headerKeys = Object.keys(rows[0]);
-  const colMap = {};
-  CATALOG_REQUIRED_COLUMNS.forEach(col => {
-    const match = headerKeys.find(k => k.trim().toLowerCase() === col);
-    if (match) colMap[col] = match;
-  });
+  const findCol = (normalizedTarget) => headerKeys.find(k => normalizeCatalogHeader(k) === normalizedTarget);
 
-  const missing = CATALOG_REQUIRED_COLUMNS.filter(col => !colMap[col]);
+  const priceCol = findCol('price');
+  const codeCol = findCol('code');
+  const nameCol = findCol('name');
+  const categoryCol = findCol('category');
+  const combinedCol = findCol('codeactivity');
+
+  const missing = [];
+  if (!priceCol) missing.push('price');
+  if (!combinedCol) {
+    if (!codeCol) missing.push('code');
+    if (!nameCol) missing.push('name');
+  }
   if (missing.length > 0) {
     return { valid: false, errors: [`Missing required column${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`], items: [] };
   }
@@ -89,11 +98,19 @@ function validateCatalogRows(rows) {
 
   rows.forEach((row, idx) => {
     const rowNum = idx + 2; // +1 for header row, +1 for 1-based
-    const code = String(row[colMap.code] ?? '').trim();
-    const name = String(row[colMap.name] ?? '').trim();
-    const category = String(row[colMap.category] ?? '').trim();
-    const priceRaw = row[colMap.price];
-    const price = Number(priceRaw);
+    let code, name;
+    if (combinedCol) {
+      const combined = String(row[combinedCol] ?? '').trim();
+      const sepIdx = combined.indexOf(' - ');
+      code = (sepIdx === -1 ? combined : combined.slice(0, sepIdx)).trim();
+      name = (sepIdx === -1 ? '' : combined.slice(sepIdx + 3)).trim();
+    } else {
+      code = String(row[codeCol] ?? '').trim();
+      name = String(row[nameCol] ?? '').trim();
+    }
+    const category = categoryCol ? String(row[categoryCol] ?? '').trim() : '';
+    const priceRaw = row[priceCol];
+    const price = Number(String(priceRaw ?? '').replace(/,/g, ''));
 
     if (!code) {
       errors.push(`Row ${rowNum}: missing code.`);
