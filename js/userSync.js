@@ -35,9 +35,12 @@ async function pushUserToSheet(db, action, payload) {
 
   const body = Object.assign({ action }, payload);
 
+  // Content-Type must stay a CORS-safelisted type (text/plain) — "application/json"
+  // forces a preflight OPTIONS request that Apps Script Web Apps never answer,
+  // which silently blocks every POST. doPost() still JSON.parses the raw body either way.
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(body)
   });
 

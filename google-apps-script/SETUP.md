@@ -57,5 +57,8 @@ If you ever need to update Code.gs:
 - "Script not found": check the URL is the /exec version not /dev
 - Sheet not updating: check the Sheet tab is named exactly "Users"
 - "Authorization required": re-deploy and click Authorize access again
-- CORS error: Apps Script handles CORS automatically — if you see this
-  the script is not deployed correctly (re-check Step 3)
+- CORS error on save/create/update: the app's POST requests use
+  `Content-Type: text/plain` on purpose (see js/userSync.js) — Apps Script
+  Web Apps never answer CORS preflight OPTIONS requests, so any JSON
+  content type on a POST gets silently blocked by the browser before it
+  reaches the script. Don't change it back to application/json.
