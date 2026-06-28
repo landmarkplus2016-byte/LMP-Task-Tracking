@@ -970,6 +970,7 @@ function userAccountsPageHtml() {
         </div>
         <div class="tasks-page-header-actions">
           <button id="export-credentials-btn" class="btn ghost sm">${iconSvg('download', 14)}<span>Export Credentials Package</span></button>
+          <button id="export-refdata-btn" class="btn ghost sm">${iconSvg('download', 14)}<span>Export Reference Data</span></button>
         </div>
       </div>
 
@@ -1086,6 +1087,7 @@ function attachUserAccountsEvents() {
   document.getElementById('add-master-user-btn').addEventListener('click', () => openUserFormModal({ mode: 'create', accountType: 'master' }));
   document.getElementById('add-coordinator-btn').addEventListener('click', () => openUserFormModal({ mode: 'create', accountType: 'coordinator' }));
   document.getElementById('export-credentials-btn').addEventListener('click', handleExportCredentialsPackage);
+  document.getElementById('export-refdata-btn').addEventListener('click', handleExportReferenceDataPackage);
 
   document.querySelectorAll('[data-action="edit-user"]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1145,6 +1147,45 @@ async function handleExportCredentialsPackage() {
     showToast('Credentials package exported. Share this file with anyone who cannot load accounts automatically on first launch.', 'success');
   } catch (err) {
     showToast('Could not export the credentials package. Please try again.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+async function handleExportReferenceDataPackage() {
+  const btn = document.getElementById('export-refdata-btn');
+  setButtonLoading(btn, true);
+
+  try {
+    const currentUser = getCurrentUser();
+    const [catalogs, catalog_items, general_streams, contractor_portions, task_templates, task_template_items] = await Promise.all([
+      db.catalogs.toArray(),
+      db.catalog_items.toArray(),
+      db.general_streams.toArray(),
+      db.contractor_portions.toArray(),
+      db.task_templates.toArray(),
+      db.task_template_items.toArray()
+    ]);
+
+    const payload = {
+      type: 'reference_data_package',
+      exported_at: new Date().toISOString(),
+      exported_by: currentUser.name,
+      version: '1.0',
+      catalogs,
+      catalog_items,
+      general_streams,
+      contractor_portions,
+      task_templates,
+      task_template_items
+    };
+
+    const filename = `reference_data_${formatDateISO(new Date())}.json`;
+    downloadBlob(JSON.stringify(payload, null, 2), filename, 'application/json');
+
+    showToast('Reference data exported. Share this file with your coordinators.', 'success');
+  } catch (err) {
+    showToast('Could not export reference data. Please try again.', 'error');
   } finally {
     setButtonLoading(btn, false);
   }
@@ -2562,29 +2603,44 @@ async function renderMyDefaultsSettings() {
 
   try {
     const user = getCurrentUser();
-    const [defaultsSetting, streamResult, templates] = await Promise.all([
+    const [defaultsSetting, streamResult, templates, refDataLoaded] = await Promise.all([
       db.app_settings.get(`user_defaults_${user.id}`),
       getActiveStreamNames(null),
-      db.task_templates.filter(t => t.is_active).toArray()
+      db.task_templates.filter(t => t.is_active).toArray(),
+      db.app_settings.get('reference_data_last_loaded')
     ]);
 
     const defaults = (defaultsSetting && defaultsSetting.value) || {};
     const streamNames = streamResult.items.map(s => s.stream_name);
+    const refDataLoadedAt = refDataLoaded ? refDataLoaded.value : null;
 
-    container.innerHTML = myDefaultsPageHtml(defaults, streamNames, templates);
+    container.innerHTML = myDefaultsPageHtml(defaults, streamNames, templates, refDataLoadedAt);
     attachMyDefaultsEvents();
   } catch (err) {
     showToast('Could not load your defaults.', 'error');
   }
 }
 
-function myDefaultsPageHtml(defaults, streamNames, templates) {
+function referenceDataCardHtml(refDataLoadedAt) {
+  const lastLoadedLabel = refDataLoadedAt ? `Last loaded: ${formatDate(refDataLoadedAt)}` : 'Never loaded';
+  return `
+    <div class="card" style="padding:18px;margin-bottom:16px">
+      <div class="lbl" style="margin-bottom:6px">Reference Data</div>
+      <p class="tasks-subtitle" style="margin-bottom:10px">Load the latest catalogs, streams, contractor portions, and templates your PM shared with you.</p>
+      <input type="file" id="refdata-file-input" accept=".json" class="hidden">
+      <button id="refdata-load-btn" class="btn ghost sm">Load reference data file</button>
+      <span style="margin-left:10px;color:var(--ink-2);font-size:12px">${lastLoadedLabel}</span>
+    </div>`;
+}
+
+function myDefaultsPageHtml(defaults, streamNames, templates, refDataLoadedAt) {
   const d = (key) => defaults[key] || '';
 
   return `
     <div class="fade-in">
       <h1>My Defaults</h1>
       <p class="tasks-subtitle">Pre-fill these values automatically when you open Bulk Entry.</p>
+      ${referenceDataCardHtml(refDataLoadedAt)}
       <div class="card" style="padding:18px">
         <div class="form-section-grid">
           ${defaultsSelectFieldHtml('region', 'Region', REGIONS, d('region'))}
@@ -2645,6 +2701,61 @@ async function handleClearMyDefaults() {
 function attachMyDefaultsEvents() {
   document.getElementById('save-defaults-btn').addEventListener('click', handleSaveMyDefaults);
   document.getElementById('clear-defaults-btn').addEventListener('click', handleClearMyDefaults);
+  document.getElementById('refdata-load-btn').addEventListener('click', () => {
+    document.getElementById('refdata-file-input').click();
+  });
+  document.getElementById('refdata-file-input').addEventListener('change', (e) => {
+    if (e.target.files[0]) handleReferenceDataFileSelected(e.target.files[0]);
+  });
+}
+
+function validateReferenceDataFile(data) {
+  if (!data || typeof data !== 'object' || data.type !== 'reference_data_package') {
+    return { valid: false, error: 'Invalid file. Ask your PM for the reference data file.' };
+  }
+  return { valid: true };
+}
+
+async function applyReferenceDataPackage(data) {
+  const putAll = (table, rows) => (Array.isArray(rows) && rows.length) ? db[table].bulkPut(rows) : Promise.resolve();
+  await Promise.all([
+    putAll('catalogs', data.catalogs),
+    putAll('catalog_items', data.catalog_items),
+    putAll('general_streams', data.general_streams),
+    putAll('contractor_portions', data.contractor_portions),
+    putAll('task_templates', data.task_templates),
+    putAll('task_template_items', data.task_template_items)
+  ]);
+}
+
+async function handleReferenceDataFileSelected(file) {
+  if (!file.name.toLowerCase().endsWith('.json')) {
+    showToast('Please select a .json file.', 'error');
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch (e) {
+    showToast('Could not parse this file as JSON.', 'error');
+    return;
+  }
+
+  const validation = validateReferenceDataFile(data);
+  if (!validation.valid) {
+    showToast(validation.error, 'error');
+    return;
+  }
+
+  try {
+    await applyReferenceDataPackage(data);
+    await db.app_settings.put({ key: 'reference_data_last_loaded', value: new Date().toISOString(), updated_at: new Date() });
+    showToast('Reference data loaded.', 'success');
+    renderMyDefaultsSettings();
+  } catch (err) {
+    showToast('Could not load reference data. Please try again.', 'error');
+  }
 }
 
 /* ==========================================================================

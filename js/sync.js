@@ -382,10 +382,20 @@ async function applyIncomingSettings(settingsArr) {
   }
 }
 
+async function applyIncomingTable(table, rows) {
+  if (Array.isArray(rows) && rows.length) await db[table].bulkPut(rows);
+}
+
 async function applyMasterPayload(payload) {
   if (payload.tasks.length > 0) await db.tasks.bulkPut(payload.tasks);
   await applyIncomingUsers(payload.users);
   await applyIncomingSettings(payload.settings);
+  await applyIncomingTable('catalogs', payload.catalogs);
+  await applyIncomingTable('catalog_items', payload.catalog_items);
+  await applyIncomingTable('general_streams', payload.general_streams);
+  await applyIncomingTable('contractor_portions', payload.contractor_portions);
+  await applyIncomingTable('task_templates', payload.task_templates);
+  await applyIncomingTable('task_template_items', payload.task_template_items);
 }
 
 /* ==========================================================================
@@ -397,6 +407,12 @@ async function buildMasterExportPayload() {
   const tasks = await db.tasks.toArray();
   const users = (await db.users.toArray()).map(({ password_hash, ...rest }) => rest);
   const settings = (await db.app_settings.toArray()).filter(s => s.key !== SHARED_FOLDER_HANDLE_KEY);
+  const catalogs = await db.catalogs.toArray();
+  const catalog_items = await db.catalog_items.toArray();
+  const general_streams = await db.general_streams.toArray();
+  const contractor_portions = await db.contractor_portions.toArray();
+  const task_templates = await db.task_templates.toArray();
+  const task_template_items = await db.task_template_items.toArray();
 
   return {
     exported_at: new Date().toISOString(),
@@ -404,7 +420,13 @@ async function buildMasterExportPayload() {
     version: '1.0',
     tasks,
     users,
-    settings
+    settings,
+    catalogs,
+    catalog_items,
+    general_streams,
+    contractor_portions,
+    task_templates,
+    task_template_items
   };
 }
 
