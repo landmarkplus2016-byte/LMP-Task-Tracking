@@ -334,14 +334,61 @@ function renderFirstLaunchNoScript() {
           <button id="pm-setup-btn" type="button" class="h-[34px] px-[14px] rounded-[7px] bg-[var(--accent)] hover:bg-[var(--accent-ink)] text-white text-[13px] font-semibold transition-colors" style="box-shadow:var(--shadow-sm)">PM Setup</button>
         </div>
       </div>
-      <div class="text-[11.5px] text-[var(--ink-3)] text-center max-w-[420px]">
-        Already have the Apps Script URL?<br>
-        Set it up in Settings → Sync &amp; Shared Folder after logging in.
+      <div id="script-url-entry-zone" class="text-[11.5px] text-[var(--ink-3)] text-center max-w-[420px]">
+        <button id="script-url-entry-link" type="button" class="text-[var(--accent)] font-semibold underline">Have the Apps Script URL?</button>
       </div>
     </div>`;
 
   document.getElementById('load-credentials-btn').addEventListener('click', triggerCredentialsImport);
   document.getElementById('pm-setup-btn').addEventListener('click', () => renderPmSetupGate('pm-setup-card'));
+  document.getElementById('script-url-entry-link').addEventListener('click', renderScriptUrlEntryForm);
+}
+
+function renderScriptUrlEntryForm() {
+  const zone = document.getElementById('script-url-entry-zone');
+  if (!zone) return;
+
+  zone.innerHTML = `
+    <div class="flex flex-col gap-[6px] w-[280px] mx-auto text-left">
+      <span class="text-[11.5px] font-semibold text-[var(--ink-2)]">Paste the Apps Script URL your PM sent you</span>
+      <input id="script-url-entry-input" type="text" autocomplete="off" placeholder="https://script.google.com/macros/s/.../exec"
+        class="h-[34px] px-[10px] rounded-[7px] border border-[var(--line)] bg-[var(--surface)] text-[12.5px] text-[var(--ink)] outline-none focus:border-[var(--accent)] focus:shadow-[0_0_0_3px_var(--accent-bg)] transition-colors">
+      <div id="script-url-entry-error" class="hidden text-[12px] text-[var(--red)]"></div>
+      <button id="script-url-entry-submit" type="button" class="h-[34px] mt-1 rounded-[7px] bg-[var(--accent)] hover:bg-[var(--accent-ink)] text-white text-[13px] font-semibold transition-colors" style="box-shadow:var(--shadow-sm)">Continue</button>
+    </div>`;
+
+  const input = document.getElementById('script-url-entry-input');
+  const errorEl = document.getElementById('script-url-entry-error');
+  const submitBtn = document.getElementById('script-url-entry-submit');
+
+  async function submitScriptUrl() {
+    const url = input.value.trim();
+    if (!url) {
+      errorEl.textContent = 'Enter the URL your PM shared with you.';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+
+    setButtonLoading(submitBtn, true, 'Connecting…');
+    errorEl.classList.add('hidden');
+
+    await db.app_settings.put({ key: 'apps_script_url', value: url, updated_at: new Date() });
+
+    try {
+      await syncUsersToLocal(db);
+      proceedToReady();
+    } catch (err) {
+      setButtonLoading(submitBtn, false);
+      errorEl.textContent = 'Could not reach that URL. Check it and try again.';
+      errorEl.classList.remove('hidden');
+    }
+  }
+
+  submitBtn.addEventListener('click', submitScriptUrl);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitScriptUrl();
+  });
+  input.focus();
 }
 
 function renderFirstLaunchFailed() {
