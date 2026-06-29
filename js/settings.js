@@ -1000,20 +1000,22 @@ function masterTeamTableHtml() {
     return `<div class="empty-state"><div class="empty-state-title">No master team members yet.</div></div>`;
   }
   return `
-    <table class="data-table user-accounts-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Email</th>
-          <th style="width:170px">Role</th>
-          <th style="width:120px">Created</th>
-          <th style="width:190px">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map(masterUserRowHtml).join('')}
-      </tbody>
-    </table>`;
+    <div class="tasks-table-wrap">
+      <table class="data-table user-accounts-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th style="width:170px">Role</th>
+            <th style="width:120px">Created</th>
+            <th style="width:190px">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(masterUserRowHtml).join('')}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 function masterUserRowHtml(u) {
@@ -1036,22 +1038,24 @@ function coordinatorsTableHtml() {
     return `<div class="empty-state"><div class="empty-state-title">No coordinators yet.</div></div>`;
   }
   return `
-    <table class="data-table user-accounts-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Email</th>
-          <th style="width:70px">Prefix</th>
-          <th style="width:90px">Status</th>
-          <th style="width:70px" class="num-col">Tasks</th>
-          <th style="width:110px">Created</th>
-          <th style="width:290px">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map(coordinatorRowHtml).join('')}
-      </tbody>
-    </table>`;
+    <div class="tasks-table-wrap">
+      <table class="data-table user-accounts-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th style="width:70px">Prefix</th>
+            <th style="width:90px">Status</th>
+            <th style="width:70px" class="num-col">Tasks</th>
+            <th style="width:110px">Created</th>
+            <th style="width:290px">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(coordinatorRowHtml).join('')}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 function coordinatorRowHtml(u) {

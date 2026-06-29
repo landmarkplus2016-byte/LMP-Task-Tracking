@@ -264,6 +264,14 @@ async function handleChangePasswordSubmit(e, user) {
   try {
     const password_hash = await hashPassword(password);
     await db.users.update(user.id, { password_hash, must_change_password: false });
+
+    const updatedUser = { ...user, password_hash, must_change_password: false };
+    try {
+      await pushUserToSheet(db, 'updateUser', { user: updatedUser });
+    } catch (syncErr) {
+      await queueFailedSync(db, 'updateUser', { user: updatedUser });
+    }
+
     await writeAuditLog({ user_id: user.id, action: 'password_changed' });
 
     const session = { id: user.id, name: user.name, role: user.role, prefix: user.prefix };
