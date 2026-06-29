@@ -338,6 +338,11 @@
   gap: 6px;
 }
 
+.data-table td.actions-cell {
+  overflow: visible;
+  white-space: nowrap;
+}
+
 .sm-icon-btn {
   width: 28px;
   height: 28px;

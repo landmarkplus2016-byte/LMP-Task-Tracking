@@ -1048,7 +1048,7 @@ function coordinatorsTableHtml() {
             <th style="width:90px">Status</th>
             <th style="width:70px" class="num-col">Tasks</th>
             <th style="width:110px">Created</th>
-            <th style="width:290px">Actions</th>
+            <th style="width:440px">Actions</th>
           </tr>
         </thead>
         <tbody>

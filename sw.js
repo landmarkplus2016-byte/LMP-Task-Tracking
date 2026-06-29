@@ -1,6 +1,6 @@
 // Bump CACHE_VERSION on every deploy — there is no build step to do this automatically,
 // and it is the only thing that makes activate() drop the previous cache.
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const CACHE_NAME = `project-tracker-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -53,6 +53,7 @@ self.addEventListener('activate', (event) => {
 // Cache-first: serve from cache immediately, refresh the cache from the network in the background.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  if (!event.request.url.startsWith('http')) return;
 
   event.respondWith(
     caches.open(CACHE_NAME).then(async (cache) => {
@@ -60,7 +61,7 @@ self.addEventListener('fetch', (event) => {
 
       const networkFetch = fetch(event.request).then((response) => {
         if (response && (response.ok || response.type === 'opaque')) {
-          cache.put(event.request, response.clone());
+          cache.put(event.request, response.clone()).catch(() => {});
         }
         return response;
       }).catch(() => null);
