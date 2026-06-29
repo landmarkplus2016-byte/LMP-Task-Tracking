@@ -1,6 +1,6 @@
 // Bump CACHE_VERSION on every deploy — there is no build step to do this automatically,
 // and it is the only thing that makes activate() drop the previous cache.
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `project-tracker-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
